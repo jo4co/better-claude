@@ -1,62 +1,13 @@
 {
-  "name": "better-claude",
+  "name": "jo4co-claude",
   "owner": {
-    "name": "Miguel Ángel Durán (midudev)",
-    "url": "https://github.com/midudev"
+    "name": "jo4co",
+    "url": "https://github.com/jo4co"
   },
   "metadata": {
-    "description": "Claude Code plugins and mods by midudev: After, a prompt queue; Use Haiku and Think Hard, prompt prefixes for one turn; Token Meter and Sub Meter, tokens and subscription usage at a glance; Image Preview, hover a pasted image to see it; Commit, Conventional Commits and a push on Haiku; Narrator, Claude tells you out loud what it did"
+    "description": "Fork personal de midudev/better-claude: Narrator, Claude tells you out loud what it did"
   },
   "plugins": [
-    {
-      "name": "after",
-      "source": "./plugins/after",
-      "description": "Queue prompts to run after the current task, without steering it.",
-      "version": "0.2.0",
-      "category": "productivity"
-    },
-    {
-      "name": "use-haiku",
-      "source": "./plugins/use-haiku",
-      "description": "Start a prompt with _ to run that turn on Haiku, shown as you type, while it runs and under the answer.",
-      "version": "0.2.0",
-      "category": "productivity"
-    },
-    {
-      "name": "think-hard",
-      "source": "./plugins/think-hard",
-      "description": "Start a prompt with + and that turn thinks at max effort.",
-      "version": "0.1.0",
-      "category": "productivity"
-    },
-    {
-      "name": "token-meter",
-      "source": "./plugins/token-meter",
-      "description": "Each turn's tokens and the session total, in color under the prompt.",
-      "version": "0.1.0",
-      "category": "productivity"
-    },
-    {
-      "name": "sub-meter",
-      "source": "./plugins/sub-meter",
-      "description": "Subscription usage at the bottom right: the 5-hour and weekly windows, as a bar.",
-      "version": "0.3.0",
-      "category": "productivity"
-    },
-    {
-      "name": "image-preview",
-      "source": "./plugins/image-preview",
-      "description": "Hover a pasted [Image #N] to see the picture: above the prompt while you write, and on the prompts you sent.",
-      "version": "0.2.0",
-      "category": "productivity"
-    },
-    {
-      "name": "commit",
-      "source": "./plugins/commit",
-      "description": "/commit asks commit + push, commit only or a new branch, then splits your changes into Conventional Commits on Haiku 5.5.",
-      "version": "0.2.1",
-      "category": "productivity"
-    },
     {
       "name": "narrator",
       "source": "./plugins/narrator",
