@@ -195,7 +195,7 @@ async function speakersFor ($: EngineInterface, text: string, language: string, 
   const speakers: Command[] = []
   if (await wslOf($)) {
     const inherited = await $.env.get('WSLENV')
-    const crossing = [inherited, 'NARRATOR_TEXT/u', 'NARRATOR_LANG/u', 'NARRATOR_VOICE/u', 'NARRATOR_SPEED/u', 'NARRATOR_TICKET/u'].filter(Boolean).join(':')
+    const crossing = [inherited, 'NARRATOR_TEXT', 'NARRATOR_LANG', 'NARRATOR_VOICE', 'NARRATOR_SPEED', 'NARRATOR_TICKET'].filter(Boolean).join(':')
     speakers.push({ argv: powershell(WINDOWS, 'powershell.exe'), env: { ...env, WSLENV: crossing }, program: 'powershell.exe' })
   }
   const { tool, languages, names } = await linuxSpeechOf($)
@@ -496,6 +496,9 @@ function roomOf (e: { surface: string; viewport?: RenderViewport }) {
 }
 
 export const register: Register = (on, options) => {
+  // Whether someone is at the session. Until session.start says otherwise (a mod loaded in the middle
+  // of a session does not see it), someone is.
+  let isInteractive = true
   const speed = Number(options.speed)
   const shortAnswer = Number(options.shortAnswer ?? SHORT_ANSWER)
   settings = {
@@ -507,6 +510,8 @@ export const register: Register = (on, options) => {
   }
 
   on('session.start', async ($, e, next) => {
+    // A session nobody is at (`claude -p`: a script, a bot that runs Claude Code) is not narrated.
+    isInteractive = e.isInteractive
     const asked = String(options.language ?? '').trim()
     if (asked && !settings.language) $.ui.log(`narrator: "${cut(asked, 40)}" is not a language code (es, en, pt...): speaking the language you write in`, { to: 'debug' })
     await $.command.register({
@@ -572,7 +577,7 @@ export const register: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
-    if (e.agentId === undefined && e.reason === 'answer' && e.answer.trim() && (await read($, enabled))) void narrate($, e.answer)
+    if (isInteractive && e.agentId === undefined && e.reason === 'answer' && e.answer.trim() && (await read($, enabled))) void narrate($, e.answer)
     return result
   })
 

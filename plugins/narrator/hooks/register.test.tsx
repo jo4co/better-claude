@@ -499,6 +499,17 @@ test("a subagent's turn and an interrupted turn are not narrated", async ($, on)
   expect(w.prompts[0]).not.toContain('subagent')
 })
 
+test('a session nobody is at (claude -p) is not narrated: no model call, no speaker', async ($, on) => {
+  const w = world(on, { store: { enabled: true } })
+  await $.session.start({ cwd: '/project', surface: 'terminal', isInteractive: false })
+  await turn($)
+  await turn($, { answer: 'ok' })
+  await w.settled()
+  expect(w.prompts).toHaveLength(0)
+  expect(w.spoken).toHaveLength(0)
+  expect(w.said).toHaveLength(0)
+})
+
 test('a new prompt silences the narration on its way', async ($, on) => {
   const w = world(on, { store: { enabled: true }, speaker: 'talks on' })
   await startSession($)
@@ -628,7 +639,7 @@ test("WSL speaks with Windows' voices, its variables crossing over", async ($, o
   await turn($)
   await speech
   expect(w.spoken[0]!.argv[0]).toBe('powershell.exe')
-  expect(w.spoken[0]!.env.WSLENV).toBe('NARRATOR_TEXT/u:NARRATOR_LANG/u:NARRATOR_VOICE/u:NARRATOR_SPEED/u:NARRATOR_TICKET/u')
+  expect(w.spoken[0]!.env.WSLENV).toBe('NARRATOR_TEXT:NARRATOR_LANG:NARRATOR_VOICE:NARRATOR_SPEED:NARRATOR_TICKET')
 })
 
 test('Linux speaks with speech-dispatcher in the language Haiku names', async ($, on) => {
