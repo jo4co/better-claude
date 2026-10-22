@@ -224,7 +224,7 @@ test('/narrator voices reports when no local voices are available', async ($, on
 test('/narrator voices includes its commands in the argument hint', async ($, on) => {
   const w = world(on)
   await startSession($)
-  expect(w.commandHints).toContain('[on | off | stop | voices | test [voice]]')
+  expect(w.commandHints).toContain('[on | off | stop | again | read | voices | test [voice]]')
 })
 
 test('/narrator test previews a named voice without changing narrator settings', { options: { voice: 'Luisa' } }, async ($, on) => {
@@ -316,7 +316,7 @@ test('a new prompt cuts the preview short, and it says so', async ($, on) => {
 test('/narrator help includes voice discovery and preview commands', async ($, on) => {
   world(on)
   await startSession($)
-  expect((await narrator($, 'unknown')).text).toBe('Usage: /narrator [on | off | stop | voices | test [voice]]')
+  expect((await narrator($, 'unknown')).text).toBe('Usage: /narrator [on | off | stop | again | read | voices | test [voice]]')
 })
 
 test('a session starts with the narrator as the last one left it', async ($, on) => {
@@ -838,6 +838,67 @@ test('/recap silences a narration that was still speaking', async ($, on) => {
   await speech
   expect(w.spoken[0]!.isEnded).toBe(false)
   await recap($)
+  await w.clock.advance(100)
+  expect(w.spoken[0]!.isEnded).toBe(true)
+})
+
+test('/narrator again says the last narration again, with no model call', async ($, on) => {
+  const w = world(on, { store: { enabled: true } })
+  await startSession($)
+  expect((await narrator($, 'again')).text).toBe('Narrator: nothing said yet.')
+  let speech = w.nextSpeech()
+  await turn($)
+  await speech
+  speech = w.nextSpeech()
+  expect((await narrator($, 'again')).text).toBe('Narrator: saying it again.')
+  await speech
+  expect(w.prompts).toHaveLength(1)
+  expect(w.spoken).toHaveLength(2)
+  expect(w.spoken[1]!.env.NARRATOR_TEXT).toBe('He añadido el narrador y los tests pasan.')
+  expect(w.spoken[1]!.env.NARRATOR_LANG).toBe('es')
+})
+
+test('/narrator read reads the last answer in full, as plain text, even with the narrator off', async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  expect((await narrator($, 'read')).text).toBe('Narrator: no answer to read yet.')
+  await turn($, { prompt: 'arregla la cola', answer: '## Hecho\nArreglé la cola en `hooks/speaker.ts` y los tests pasan.\n```sh\nclaude plugin test .\n```' })
+  await w.settled()
+  expect(w.spoken).toHaveLength(0)
+  const speech = w.nextSpeech()
+  expect((await narrator($, 'read')).text).toBe('Narrator: reading the last answer.')
+  await speech
+  expect(w.prompts).toHaveLength(0)
+  expect(w.spoken[0]!.env.NARRATOR_TEXT).toBe('Hecho Arreglé la cola en speaker y los tests pasan.')
+  expect(w.spoken[0]!.env.NARRATOR_LANG).toBe('es')
+})
+
+test("/narrator read keeps the main loop's answer, not a subagent's", async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  await turn($, { answer: 'Los tests pasan y el narrador habla.' })
+  await turn($, { answer: 'subagent notes', agentId: 'a1' })
+  const speech = w.nextSpeech()
+  await narrator($, 'read')
+  await speech
+  expect(w.spoken[0]!.env.NARRATOR_TEXT).toBe('Los tests pasan y el narrador habla.')
+})
+
+test('/narrator read says when the answer has nothing to read aloud', async ($, on) => {
+  world(on)
+  await startSession($)
+  await turn($, { answer: '```ts\nconst x = 1\n```' })
+  expect((await narrator($, 'read')).text).toBe('Narrator: the last answer has nothing to read aloud.')
+})
+
+test('a new prompt cuts /narrator read short', async ($, on) => {
+  const w = world(on, { speaker: 'talks on' })
+  await startSession($)
+  await turn($)
+  const speech = w.nextSpeech()
+  await narrator($, 'read')
+  await speech
+  await $.prompt.submit({ text: 'next task', wait: false, origin: { kind: 'composer' } })
   await w.clock.advance(100)
   expect(w.spoken[0]!.isEnded).toBe(true)
 })

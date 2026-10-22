@@ -30,9 +30,13 @@ A new prompt cuts the narration short. It stays on in your next sessions until y
 /narrator         switch on or off
 /narrator on|off
 /narrator stop    quiet now, stay on
+/narrator again   say the last narration again
+/narrator read    read the last answer in full
 /narrator voices  list the installed voices, by language
 /narrator test [voice]  say a short sample with a voice
 ```
+
+`/narrator again` says the last narration again, as it was, with no model call. `/narrator read` reads Claude's last answer in full instead of its summary, as plain text (no code blocks, a path by its file's name), even with the narrator off; a long one takes a while, and `/narrator stop`, a click on the switch or a new prompt cuts it short.
 
 `/narrator voices` lists the voices your system has, one line per language (`es-ES: Eddy, Mónica`); on macOS it leaves out the novelty ones (Bahh, Bells...). On Linux it shows speech-dispatcher's table, whose NAME column holds the voices of its output module, and eSpeak's.
 
