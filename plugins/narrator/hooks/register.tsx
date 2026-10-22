@@ -98,6 +98,9 @@ let hasWarned = false
 let hintWidth = 0
 // The language the last narration was said in: a short answer whose words do not tell is read in it.
 let spokenLanguage = ''
+// The last narration said, for `/narrator again`, and the main loop's last answer with its request, for `/narrator read`.
+let lastSaid: { text: string; language: string } | undefined
+let lastAnswer: { answer: string; request: string } | undefined
 // The sweep across the switch, running while it speaks.
 let sweep: Timer | undefined
 
@@ -409,6 +412,7 @@ async function narrate ($: EngineInterface, answer: string) {
     const isReadable = settings.language ? ownLanguage === settings.language : directLanguage !== '' || (await platformOf($)) === 'macos'
     if (direct !== '' && direct.length <= settings.shortAnswer && isReadable) {
       spokenLanguage = directLanguage
+      lastSaid = { text: direct, language: directLanguage }
       await speak($, narration, direct, directLanguage)
       return
     }
@@ -422,12 +426,45 @@ async function narrate ($: EngineInterface, answer: string) {
     // No narration written: the answer itself, as far as it reads aloud.
     const { text, language } = told?.text ? told : { text: cut(direct, 250), language: directLanguage }
     if (language) spokenLanguage = language
-    if (text) await speak($, narration, text, language)
+    if (!text) return
+    lastSaid = { text, language }
+    await speak($, narration, text, language)
   } catch (error) {
     $.ui.log(`narrator: ${message(error)}`, { to: 'debug' })
   } finally {
     if (current === narration) current = undefined
   }
+}
+
+/** Says `text` again, as it is, in place of whatever is being said: the last narration, or an answer read in full. */
+async function retell ($: EngineInterface, text: string, language: string) {
+  silence()
+  const narration: Narration = { isActive: true, abort: new AbortController() }
+  current = narration
+  try {
+    await speak($, narration, text, language)
+  } catch (error) {
+    $.ui.log(`narrator: ${message(error)}`, { to: 'debug' })
+  } finally {
+    if (current === narration) current = undefined
+  }
+}
+
+/** `/narrator again`: the last narration, said again with no model call. */
+function sayAgain ($: EngineInterface) {
+  if (!lastSaid) return 'Narrator: nothing said yet.'
+  void retell($, lastSaid.text, lastSaid.language)
+  return 'Narrator: saying it again.'
+}
+
+/** `/narrator read`: the last answer in full, as plain text, in the language its words or its request tell. */
+function readAnswer ($: EngineInterface) {
+  if (!lastAnswer) return 'Narrator: no answer to read yet.'
+  const { answer, request: asked } = lastAnswer
+  const text = plain(answer)
+  if (!text) return 'Narrator: the last answer has nothing to read aloud.'
+  void retell($, text, guessLanguage(answer) || guessLanguage(`${asked}\n${answer}`) || spokenLanguage)
+  return 'Narrator: reading the last answer.'
 }
 
 /** A click on the switch: while it speaks, on to the next narration in the line or quiet; else on or off. */
@@ -517,7 +554,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'narrator',
       description: 'Claude tells you out loud what it did after each turn · no argument: switch on or off',
-      argumentHint: '[on | off | stop | voices | test [voice]]',
+      argumentHint: '[on | off | stop | again | read | voices | test [voice]]',
       immediate: true
     })
     const isEnabled = (await $.store.get('enabled')) === true
@@ -548,7 +585,9 @@ export const register: Register = (on, options) => {
       silence()
       return { text: 'Narrator: quiet.' }
     }
-    if (arg !== '' && arg !== 'on' && arg !== 'off') return { text: 'Usage: /narrator [on | off | stop | voices | test [voice]]' }
+    if (arg === 'again') return { text: sayAgain($) }
+    if (arg === 'read') return { text: readAnswer($) }
+    if (arg !== '' && arg !== 'on' && arg !== 'off') return { text: 'Usage: /narrator [on | off | stop | again | read | voices | test [voice]]' }
     const isEnabled = await setEnabled($, arg === '' ? undefined : arg === 'on')
     return { text: isEnabled ? 'Narrator on: Claude will tell you out loud what it did after each turn.' : 'Narrator off.' }
   })
@@ -577,6 +616,8 @@ export const register: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
+    // Kept on or off, so `/narrator read` can read it whenever it is asked.
+    if (e.agentId === undefined && e.reason === 'answer' && e.answer.trim()) lastAnswer = { answer: e.answer, request }
     if (isInteractive && e.agentId === undefined && e.reason === 'answer' && e.answer.trim() && (await read($, enabled))) void narrate($, e.answer)
     return result
   })
