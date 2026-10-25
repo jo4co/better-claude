@@ -19,7 +19,7 @@
       "name": "user-tools",
       "source": "./plugins/user-tools",
       "description": "A User Tools panel: pick the model and the effort with a click, switch the narrator, Remote Control and Prompt Upgrade. Its name, models and efforts are yours to change in /config.",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "category": "productivity"
     }
   ]

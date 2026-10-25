@@ -127,6 +127,15 @@ test('the narrator row switches the narrator mod through /narrator', async ($, o
   expect(w.ran).toContain('/narrator on')
 })
 
+test('the narrator row replays the last narration through /narrator again', async ($, on) => {
+  const w = world(on)
+  await $.command.run(TOGGLE)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await ui.press({ key: 'setting:narrator:replay' })
+  await ui.unmount()
+  expect(w.ran).toContain('/narrator again')
+})
+
 test('the Remote Control row runs /remote-control and follows its state', async ($, on) => {
   const w = world(on, ['model', 'effort', { name: 'remote-control', description: 'Disconnect Remote Control' }])
   await $.command.run(TOGGLE)

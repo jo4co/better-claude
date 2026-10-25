@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface as Engine, Register } from 'claude-code'
+import type { EngineInterface as Engine, Register, RenderChildren } from 'claude-code'
 
 import { UPGRADE_PANE, dropUpgrade, isBusy, isUpgrading, loadUpgradeSwitch, renderUpgrade, startUpgrade, switchUpgrade } from './upgrade'
 
@@ -69,6 +69,13 @@ async function switchNarrator ($: Engine) {
   const { value: isOn = false } = await $.state.get(narratorOn)
   await $.command.run({ command: 'narrator', args: isOn ? 'off' : 'on' })
     .catch(() => $.ui.toast('Narrator is not installed: /plugin install narrator@jo4co-claude'))
+}
+
+/** Replay: /narrator again says the last narration once more, with no model call. */
+async function replayNarrator ($: Engine) {
+  const { text = '' } = await $.command.run({ command: 'narrator', args: 'again' })
+    .catch(() => ({ text: 'Narrator is not installed: /plugin install narrator@jo4co-claude' }))
+  if (!text.includes('saying it again')) $.ui.toast(text || 'Narrator: nothing said yet.')
 }
 
 /**
@@ -168,18 +175,21 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
-    const setting = (key: string, name: string, hint: string, isOn: boolean, press: () => void) => (
+    const setting = (key: string, name: string, hint: string, isOn: boolean, press: () => void, extra?: RenderChildren) => (
       <Box flexDirection="row" justifyContent="space-between">
         <Box flexDirection="row">
           <Text color={isOn ? ON_GREEN : undefined} dimColor={!isOn}>{isOn ? '● ' : '○ '}</Text>
           <Text bold>{name}</Text>
           <Text dimColor>{`  ${hint}`}</Text>
         </Box>
-        <Button key={key} plain onPress={press}>
-          {isOn
-            ? <Text color="#ffffff" backgroundColor={ON_GREEN}>{' ● On  '}</Text>
-            : <Text dimColor>{' ○ Off '}</Text>}
-        </Button>
+        <Box flexDirection="row">
+          {extra}
+          <Button key={key} plain onPress={press}>
+            {isOn
+              ? <Text color="#ffffff" backgroundColor={ON_GREEN}>{' ● On  '}</Text>
+              : <Text dimColor>{' ○ Off '}</Text>}
+          </Button>
+        </Box>
       </Box>
     )
 
@@ -210,7 +220,10 @@ export const register: Register = (on, options) => {
           {row('MODEL', models, isModel, ACCENT, c => pickModel($, c))}
           {row('EFFORT', efforts, c => level === c.value, EFFORT_BG, c => void pickEffort($, c))}
           {heading('Settings')}
-          {setting('setting:narrator', 'Narrator', 'reads each answer out loud', isNarratorOn, () => void switchNarrator($))}
+          {setting('setting:narrator', 'Narrator', 'reads each answer out loud', isNarratorOn, () => void switchNarrator($),
+            <Button key="setting:narrator:replay" plain onPress={() => void replayNarrator($)}>
+              <Text color={ACCENT}>{' ↻ Replay '}</Text>
+            </Button>)}
           {setting('setting:remote', 'Remote Control', isRemoteOn ? 'off opens its Disconnect dialog' : 'control this session from your phone', isRemoteOn, () => switchRemoteControl($))}
           {setting('setting:upgrade', 'Prompt Upgrade', 'turns a prompt into a plan', isUpgradeOn, () => void switchUpgrade($))}
         </Box>
