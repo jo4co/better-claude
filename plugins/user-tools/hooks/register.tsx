@@ -184,7 +184,11 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column" width={width} borderStyle="round" borderColor={ACCENT} paddingX={1}>
           <Box flexDirection="row" justifyContent="space-between" marginBottom={1}>
             <Text color={ACCENT} bold>{`◆  ${spaced(title)}`}</Text>
-            <Text dimColor>{effortLabel ? `${modelLabel} · ${effortLabel}` : modelLabel}</Text>
+            <Box flexDirection="row">
+              <Text dimColor>{effortLabel ? `${modelLabel} · ${effortLabel}  ` : `${modelLabel}  `}</Text>
+              {/* Ours, not the engine's [-]: that one folds the band, and the footer button cannot unfold it. */}
+              <Button key="close" plain dimColor onPress={() => void toggle($)}>✕</Button>
+            </Box>
           </Box>
           {row('MODEL', models, isModel, ACCENT, c => pickModel($, c))}
           {row('EFFORT', efforts, c => level === c.value, EFFORT_BG, c => void pickEffort($, c))}

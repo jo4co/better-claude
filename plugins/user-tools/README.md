@@ -1,6 +1,8 @@
 # User Tools
 
-A framed panel above the prompt for the session's settings, shown and hidden from the **◆ User Tools ▾** button in the footer or with `/user-tools` (`[-]` or ctrl+x ctrl+a collapses it).
+A framed panel above the prompt for the session's settings, shown and hidden from the **◆ User Tools ▾** button in the footer or with `/user-tools` (or its own **✕**).
+
+> Close it with **✕**, not with the `[-]` Claude Code draws beside it: that one folds the whole band, and the footer button cannot unfold it. If you see `▸ plugin panel hidden`, press **ctrl+x ctrl+a**.
 
 ```text
 MODEL    Haiku 5.5  [Sonnet 5.5]  Opus 5.5  Fable 5.1

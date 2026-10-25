@@ -55,7 +55,7 @@ test('the panel shows only once /user-tools opens it', async ($, on) => {
   await $.command.run(TOGGLE)
   const open = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect((await open.find({ type: 'Text', text: /Sonnet 5.5 · / }))).toBeUndefined()
-  expect((await open.find({ type: 'Text', text: /^Sonnet 5.5$/ }))).toBeDefined()
+  expect((await open.find({ type: 'Text', text: /^Sonnet 5.5 *$/ }))).toBeDefined()
   await open.unmount()
 })
 
@@ -147,4 +147,15 @@ test('with Prompt Upgrade on, a typed prompt is asked about, rewritten and sent'
   await pane.press({ key: 'send' })
   await pane.unmount()
   expect(w.prompts).toEqual(['I need a 30-day marketing plan focused on more orders.'])
+})
+
+test('the ✕ in the panel hides it', async ($, on) => {
+  world(on)
+  await $.command.run(TOGGLE)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await ui.press({ key: 'close' })
+  await ui.unmount()
+  const after = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await after.find({ type: 'Text', text: /MODEL/ })).toBeUndefined()
+  await after.unmount()
 })
