@@ -1,0 +1,43 @@
+{
+  "name": "user-tools",
+  "version": "0.1.0",
+  "description": "A User Tools panel: pick the model and the effort with a click, switch the narrator and Prompt Upgrade. Its name, models and efforts are yours to change in /config.",
+  "author": {
+    "name": "jo4co",
+    "url": "https://github.com/jo4co"
+  },
+  "license": "MIT",
+  "keywords": [
+    "panel",
+    "model",
+    "effort",
+    "mod"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "title": {
+      "type": "string",
+      "title": "Panel name",
+      "description": "The name on the footer button and the pane's tab.",
+      "default": "User Tools"
+    },
+    "models": {
+      "type": "string",
+      "title": "Models",
+      "description": "The model buttons, comma separated, each Label=model (an alias such as opus or a full id).",
+      "default": "Haiku 5.5=claude-haiku-5-5, Sonnet 5.5=claude-sonnet-5-5, Opus 5.5=claude-opus-5-5, Fable 5.1=claude-fable-5-1"
+    },
+    "efforts": {
+      "type": "string",
+      "title": "Efforts",
+      "description": "The effort buttons, comma separated, each Label=level or just the level (low, medium, high, xhigh, max).",
+      "default": "Low=low, Medium=medium, High=high, XHigh=xhigh, Max=max"
+    },
+    "upgradeModel": {
+      "type": "string",
+      "title": "Prompt Upgrade model",
+      "description": "The model that asks the questions and rewrites the prompt: an alias (sonnet, haiku) or a full id.",
+      "default": "sonnet"
+    }
+  }
+}

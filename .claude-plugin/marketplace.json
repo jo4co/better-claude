@@ -12,7 +12,14 @@
       "name": "narrator",
       "source": "./plugins/narrator",
       "description": "Click ⏸︎ narrator off in the footer, or /narrator, and after each turn Claude tells you out loud what it did, in your language, with the best free voice your system has.",
-      "version": "0.5.0",
+      "version": "0.6.0",
+      "category": "productivity"
+    },
+    {
+      "name": "user-tools",
+      "source": "./plugins/user-tools",
+      "description": "A User Tools panel: pick the model and the effort with a click, switch the narrator and Prompt Upgrade. Its name, models and efforts are yours to change in /config.",
+      "version": "0.1.0",
       "category": "productivity"
     }
   ]
