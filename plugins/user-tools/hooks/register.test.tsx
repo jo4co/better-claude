@@ -23,10 +23,10 @@ const TOGGLE = {
 } as const
 
 /** What sits beneath the mod: the commands it runs and the effort each request sends. */
-function world (on: On, commands: string[] = ['model', 'effort']) {
+function world (on: On, commands: (string | { name: string, description: string })[] = ['model', 'effort']) {
   const ran: string[] = []
   const efforts: unknown[] = []
-  on('command.list', () => ({ value: commands.map(name => ({ name })) as never }))
+  on('command.list', () => ({ value: commands.map(c => typeof c === 'string' ? { name: c } : c) as never }))
   on('command.run', ($, e) => {
     ran.push(`/${e.command} ${e.args}`)
     return { text: '' }
@@ -125,6 +125,16 @@ test('the narrator row switches the narrator mod through /narrator', async ($, o
   await ui.press({ key: 'setting:narrator' })
   await ui.unmount()
   expect(w.ran).toContain('/narrator on')
+})
+
+test('the Remote Control row runs /remote-control and follows its state', async ($, on) => {
+  const w = world(on, ['model', 'effort', { name: 'remote-control', description: 'Disconnect Remote Control' }])
+  await $.command.run(TOGGLE)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /off opens its Disconnect dialog/ })).toBeDefined()
+  await ui.press({ key: 'setting:remote' })
+  await ui.unmount()
+  expect(w.ran.map(r => r.trim())).toContain('/remote-control')
 })
 
 test('with Prompt Upgrade on, a typed prompt is asked about, rewritten and sent', async ($, on) => {

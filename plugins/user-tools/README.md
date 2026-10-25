@@ -16,6 +16,7 @@ EFFORT   Low  Medium  [High]  XHigh  Max
 ### Settings
 
 - **Narrator**: switches the [narrator](../narrator/README.md) mod (`/narrator on|off`). To keep its switch only here, turn off **Footer switch** in `/config` → narrator.
+- **Remote Control**: on while the session is connected to claude.ai/code or the Claude app. Off → On runs `/remote-control`; On → Off runs it too, which opens Claude Code's own dialog: pick **Disconnect this session**.
 - **Prompt Upgrade**: while on, a prompt you type waits in a *Prompt Upgrade* pane instead of going to Claude. It asks up to three quick questions (pick an option, type your own or skip), rewrites your prompt into a request for a plan, and lets you **Send** it, **Edit in prompt**, **Send original** or **Cancel**. Esc on the pane drops the prompt.
 
 ## Make it yours

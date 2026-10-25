@@ -1,7 +1,7 @@
 {
   "name": "user-tools",
-  "version": "0.1.1",
-  "description": "A User Tools panel: pick the model and the effort with a click, switch the narrator and Prompt Upgrade. Its name, models and efforts are yours to change in /config.",
+  "version": "0.1.2",
+  "description": "A User Tools panel: pick the model and the effort with a click, switch the narrator, Remote Control and Prompt Upgrade. Its name, models and efforts are yours to change in /config.",
   "author": {
     "name": "jo4co",
     "url": "https://github.com/jo4co"

@@ -71,6 +71,22 @@ async function switchNarrator ($: Engine) {
     .catch(() => $.ui.toast('Narrator is not installed: /plugin install narrator@jo4co-claude'))
 }
 
+/**
+ * Remote Control has no state a mod can read, but /remote-control says where it stands:
+ * its description turns to "Disconnect Remote Control" while the session is connected.
+ */
+async function isRemoteControlOn ($: Engine): Promise<boolean> {
+  const command = (await $.command.list()).find(c => c.name === 'remote-control')
+  return command?.description.startsWith('Disconnect') ?? false
+}
+
+/** /remote-control connects the session, or, while connected, opens its own Disconnect dialog. */
+function switchRemoteControl ($: Engine) {
+  $.command.run({ command: 'remote-control' })
+    .then(() => $.ui.invalidate('ui.render'))
+    .catch(() => $.ui.toast('Remote Control is not available in this session'))
+}
+
 export const register: Register = (on, options) => {
   const opts = options as Options
   const title = opts.title?.trim() || 'User Tools'
@@ -143,6 +159,7 @@ export const register: Register = (on, options) => {
     const effortLabel = efforts.find(c => c.value === level)?.label ?? level
     const { value: isNarratorOn = false } = await $.state.get(narratorOn)
     const isUpgradeOn = await isUpgrading($)
+    const isRemoteOn = await isRemoteControlOn($)
     const width = Math.min(WIDTH, e.props.bodyColumns)
 
     const heading = (name: string) => (
@@ -194,6 +211,7 @@ export const register: Register = (on, options) => {
           {row('EFFORT', efforts, c => level === c.value, EFFORT_BG, c => void pickEffort($, c))}
           {heading('Settings')}
           {setting('setting:narrator', 'Narrator', 'reads each answer out loud', isNarratorOn, () => void switchNarrator($))}
+          {setting('setting:remote', 'Remote Control', isRemoteOn ? 'off opens its Disconnect dialog' : 'control this session from your phone', isRemoteOn, () => switchRemoteControl($))}
           {setting('setting:upgrade', 'Prompt Upgrade', 'turns a prompt into a plan', isUpgradeOn, () => void switchUpgrade($))}
         </Box>
       </Box>
