@@ -85,7 +85,7 @@ const sweepStep = atom({ plugin: 'narrator', key: 'sweepStep' } as const, 0)
 /** An answer this short is read out as it is: no model call to write a narration of it. */
 const SHORT_ANSWER = 200
 
-let settings = { voice: '', model: 'haiku', speed: SPEED, shortAnswer: SHORT_ANSWER, language: '' }
+let settings = { voice: '', model: 'haiku', speed: SPEED, shortAnswer: SHORT_ANSWER, language: '', footerSwitch: true }
 // The main loop's turn so far: the prompt that started it and each tool call it made.
 let request = ''
 let actions: string[] = []
@@ -543,7 +543,8 @@ export const register: Register = (on, options) => {
     model: String(options.model || 'haiku'),
     speed: speed > 0 ? speed : SPEED,
     shortAnswer: shortAnswer >= 0 ? shortAnswer : SHORT_ANSWER,
-    language: languageOf(options.language)
+    language: languageOf(options.language),
+    footerSwitch: options.footerSwitch !== false
   }
 
   on('session.start', async ($, e, next) => {
@@ -628,6 +629,8 @@ export const register: Register = (on, options) => {
   // Where the row is short it gives up "on" or "off", then the language, then "narrator" (or
   // "narrating"): its sign and color still tell.
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    // Switched off where another panel (User Tools) holds the narrator's switch.
+    if (!settings.footerSwitch) return next(e)
     const isEnabled = await read($, enabled)
     const speaking = await read($, speech)
     const step = speaking ? await read($, sweepStep) : 0
