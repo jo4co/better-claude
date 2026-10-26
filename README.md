@@ -6,6 +6,7 @@ Plugins and mods for Claude Code by midudev, one per folder in [`plugins/`](plug
 
 | Plugin | What it does | Folder |
 | --- | --- | --- |
+| **Quick Peek** | The paths in Claude's replies become links: hover one to preview it by the pointer, click it to show it in Finder. | [`plugins/quick-peek/`](plugins/quick-peek/README.md) |
 | **Image Preview** | Hover a pasted `[Image #N]` to see the picture, while you write and on the prompts you sent. | [`plugins/image-preview/`](plugins/image-preview/README.md) |
 | **Sub Meter** | Subscription usage at the bottom right: the 5-hour and weekly windows, as a bar. | [`plugins/sub-meter/`](plugins/sub-meter/README.md) |
 | **Context Meter** | The session's context window fill, right above the prompt: yellow when it is time to `/compact`, red when a new session is better. | [`plugins/context-meter/`](plugins/context-meter/README.md) |
@@ -24,6 +25,7 @@ Plugins and mods for Claude Code by midudev, one per folder in [`plugins/`](plug
 
 ```text
 /plugin marketplace add midudev/better-claude
+/plugin install quick-peek@better-claude
 /plugin install image-preview@better-claude
 /plugin install sub-meter@better-claude
 /plugin install context-meter@better-claude

@@ -1,0 +1,409 @@
+import type { Elements, EngineInterface, EventOf, FsStat, Register, RenderElement } from 'claude-code'
+
+import { blocks, inline, items, markerOf, widthOf, wrap } from './markdown'
+import type { Item, Row, Run } from './markdown'
+import { pathOfSpan, pathsIn, resolve } from './paths'
+import { MACOS } from './window'
+
+type Engine = EngineInterface
+type Ui = Elements['terminal']
+type Message = Extract<EventOf['ui.render'], { component: 'AssistantMessage', surface: 'terminal' }>
+type Platform = 'macos' | 'linux' | 'windows' | 'other'
+
+/** A path a reply names that leads somewhere: where it lands, and what is there. */
+type Target = { path: string; stat: FsStat }
+/** An item of a list the mod draws: its marker, its runs, the items under it, blank lines before it. */
+type DrawnItem = { marker: string; runs: Run[]; children: DrawnItem[]; gap: number }
+/** A part of a reply: drawn by the engine's Markdown, or by the mod, its paths links. */
+type Part =
+  | { kind: 'markdown'; text: string; gap: number }
+  | { kind: 'paragraph'; runs: Run[]; gap: number }
+  | { kind: 'list'; items: DrawnItem[]; gap: number }
+/** How the mod draws a reply: its parts, and the paths its runs link to (`Run.link` indexes them). */
+type Plan = { parts: Part[]; targets: Target[] }
+
+// The bullet the engine draws before a reply, by system, and the columns it takes.
+const BULLET = { macos: '⏺', other: '●' }
+const BULLET_COLUMNS = 2
+// How long a path is taken to be there, or not there, before it is looked at again; and a plan.
+const FOUND_MS = 30_000
+const MISSING_MS = 3_000
+const PLAN_MS = 10_000
+const PLANS = 300
+// The longest side of the preview's picture, in points, and the most seconds the window stays.
+const WINDOW_SIZE = 360
+const WINDOW_LIFE = 60
+
+const stats = new Map<string, { stat: FsStat | null; at: number }>()
+const plans = new Map<string, { plan: Plan | null; at: number }>()
+let platform: Promise<Platform> | undefined
+let wsl: Promise<boolean> | undefined
+// Whether a hover opens a window by the pointer (macOS); else each path carries a card the
+// terminal reveals over it. The path the pointer is on, and the part it is on; the window open.
+let windowing = false
+let hovered: { path: string; target: string } | undefined
+let window: { path: string; isOpen: boolean } | undefined
+
+/** The system the session runs on, asked once. */
+function platformOf ($: Engine) {
+  platform ??= (async (): Promise<Platform> => {
+    if ((await $.env.get('OS')) === 'Windows_NT') return 'windows'
+    const name = (await $.process.run(['uname', '-s']).catch(() => undefined))?.stdout.trim()
+    return name === 'Darwin' ? 'macos' : name === 'Linux' ? 'linux' : 'other'
+  })()
+  return platform
+}
+
+/** Whether the session runs under WSL: Linux, on a Windows desktop, whose file manager shows the path. */
+function wslOf ($: Engine) {
+  wsl ??= (async () => (await platformOf($)) === 'linux' && (await $.env.get('WSL_DISTRO_NAME')) !== undefined)()
+  return wsl
+}
+
+/** What is at `path`, looked at again once its answer is old; null where nothing is. */
+async function statOf ($: Engine, path: string) {
+  const now = Date.now()
+  const known = stats.get(path)
+  if (known && now - known.at < (known.stat ? FOUND_MS : MISSING_MS)) return known.stat
+  const stat = await $.fs.stat(path).catch(() => null)
+  stats.set(path, { stat: stat && stat.kind !== 'other' ? stat : null, at: now })
+  return stats.get(path)!.stat
+}
+
+/** A run cut where it names a path, each path a run of its own carrying the target it links to. */
+function link (run: Run, found: { start: number; end: number; link: number }[]): Run[] {
+  const out: Run[] = []
+  let at = 0
+  for (const { start, end, link } of found) {
+    if (start > at) out.push({ text: run.text.slice(at, start), style: run.style })
+    out.push({ text: run.text.slice(start, end), style: run.style, link })
+    at = end
+  }
+  if (at < run.text.length) out.push({ text: run.text.slice(at), style: run.style })
+  return out
+}
+
+/**
+ * How the mod draws `text`: its paragraphs and lists that name a path that leads somewhere drawn
+ * by the mod, each such path a link; every other block, and the runs between, by the engine's
+ * own Markdown. Null when no path in it leads anywhere: the engine draws the reply.
+ */
+async function planOf ($: Engine, text: string): Promise<Plan | null> {
+  const cwd = await $.session.cwd()
+  const key = `${cwd}\n${text}`
+  const known = plans.get(key)
+  if (known && Date.now() - known.at < PLAN_MS) return known.plan
+
+  const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+  type Pending = { run: Run; found: { start: number; end: number; path: string }[] }
+  const pending: Pending[] = []
+  const runsOf = (source: string) =>
+    inline(source).map(run => {
+      const found: Pending['found'] = []
+      if (run.style.href === undefined) {
+        const named = run.style.code ? [pathOfSpan(run.text)].flatMap(target => (target ? [{ start: 0, end: run.text.length, target }] : [])) : pathsIn(run.text)
+        for (const { start, end, target } of named) {
+          const path = resolve(target, cwd, home)
+          if (path) found.push({ start, end, path })
+        }
+      }
+      const entry = { run, found }
+      pending.push(entry)
+      return entry
+    })
+
+  type Drafted = { kind: 'markdown'; text: string; gap: number } | { kind: 'paragraph'; runs: Pending[]; gap: number } | { kind: 'list'; items: DraftItem[]; gap: number }
+  type DraftItem = { marker: string; runs: Pending[]; children: DraftItem[]; gap: number }
+  const draftItems = (list: Item[], depth: number): DraftItem[] =>
+    list.map(item => ({ marker: markerOf(item, depth), runs: runsOf(item.text), children: draftItems(item.children, depth + 1), gap: item.gap }))
+  const cut = blocks(text)
+  const drafted: Drafted[] = cut.map(block =>
+    block.kind === 'paragraph' ? { kind: 'paragraph', runs: runsOf(block.text), gap: block.gap }
+      : block.kind === 'list' ? { kind: 'list', items: draftItems(items(block.text), 0), gap: block.gap }
+        : { kind: 'markdown', text: block.text, gap: block.gap })
+
+  const paths = [...new Set(pending.flatMap(entry => entry.found.map(found => found.path)))]
+  const found = new Map((await Promise.all(paths.map(async path => [path, await statOf($, path)] as const))).filter(([, stat]) => stat !== null) as [string, FsStat][])
+  const targets: Target[] = []
+  const finish = (runs: Pending[]) =>
+    runs.flatMap(({ run, found: named }) => {
+      const kept = named.filter(entry => found.has(entry.path)).map(entry => ({ ...entry, link: targets.push({ path: entry.path, stat: found.get(entry.path)! }) - 1 }))
+      return link(run, kept)
+    })
+  const linked = (runs: Run[]) => runs.some(run => run.link !== undefined)
+  const finishItems = (list: DraftItem[]): DrawnItem[] => list.map(item => ({ marker: item.marker, runs: finish(item.runs), children: finishItems(item.children), gap: item.gap }))
+  const anyLinked = (list: DrawnItem[]): boolean => list.some(item => linked(item.runs) || anyLinked(item.children))
+
+  const parts: Part[] = []
+  drafted.forEach((draft, i) => {
+    let part: Part = { kind: 'markdown', text: cut[i]!.text, gap: draft.gap }
+    if (draft.kind === 'paragraph') {
+      const runs = finish(draft.runs)
+      if (linked(runs)) part = { kind: 'paragraph', runs, gap: draft.gap }
+    } else if (draft.kind === 'list') {
+      const list = finishItems(draft.items)
+      if (anyLinked(list)) part = { kind: 'list', items: list, gap: draft.gap }
+    }
+    // The blocks the engine draws next to each other are one Markdown, as written between them.
+    const last = parts.at(-1)
+    if (part.kind === 'markdown' && last?.kind === 'markdown') last.text += '\n'.repeat(part.gap + 1) + part.text
+    else parts.push(part)
+  })
+  const plan = targets.length > 0 ? { parts, targets } : null
+  if (plans.size >= PLANS) plans.delete(plans.keys().next().value!)
+  plans.set(key, { plan, at: Date.now() })
+  return plan
+}
+
+const sizeOf = (bytes: number) =>
+  bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : bytes < 1024 ** 3 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${(bytes / 1024 ** 3).toFixed(1)} GB`
+
+const ago = (ms: number) => {
+  const seconds = Math.max(0, Math.round((Date.now() - ms) / 1000))
+  const [value, unit] = seconds < 60 ? [seconds, 's'] : seconds < 3600 ? [Math.round(seconds / 60), 'min'] : seconds < 86400 ? [Math.round(seconds / 3600), 'h'] : [Math.round(seconds / 86400), 'd']
+  return `${value} ${unit} ago`
+}
+
+/** The line the terminal shows over a path where no window can: what it is, and what a click does. */
+function cardOf (target: Target) {
+  const name = target.path.slice(target.path.lastIndexOf('/') + 1) || target.path
+  const what = target.stat.kind === 'dir' ? 'folder' : sizeOf(target.stat.size)
+  return ` ${name} · ${what} · ${ago(target.stat.mtimeMs)} · click: show in folder `
+}
+
+/**
+ * The rows of a wrapped paragraph, `width` columns: text in its style, each part of a path a
+ * `Client` that takes the pointer.
+ */
+function drawRows (ui: Ui, rows: Row[], width: number, targets: Target[], parts: Map<number, number>) {
+  const { Box, Client, Link, Text } = ui
+  return rows.map(row => {
+    let column = 0
+    return (
+      <Box flexDirection="row">
+        {row.length === 0 && <Text> </Text>}
+        {row.map(run => {
+          const at = column
+          column += widthOf(run.text)
+          const { bold, italic, strike, code, href } = run.style
+          if (run.link === undefined) {
+            const style = { bold, italic, strikethrough: strike, ...(code && { color: 'permission' }) }
+            return href === undefined ? <Text {...style}>{run.text}</Text> : <Text {...style}><Link href={href}>{run.text}</Link></Text>
+          }
+          const part = parts.get(run.link) ?? 0
+          parts.set(run.link, part + 1)
+          const target = targets[run.link]!
+          const props = { label: run.text, path: target.path, ...(bold && { bold }), ...(italic && { italic }), ...(strike && { strike }) }
+          const client = <Client key={`path:${run.link}:${part}`} module="./link.tsx" props={props} />
+          if (windowing) return client
+          // No window: a card over the path, which the terminal reveals while the pointer is on it,
+          // moved left as far as it needs to end inside the reply.
+          const card = cardOf(target)
+          const left = Math.max(-at, Math.min(0, width - at - widthOf(card)))
+          return (
+            <Box key={`card:${run.link}:${part}`}>
+              {client}
+              <Box position="absolute" top={-1} left={left} width={Math.min(widthOf(card), width)} display="none" hover={{ display: 'flex' }}>
+                <Text inverse wrap="truncate-end">{card}</Text>
+              </Box>
+            </Box>
+          )
+        })}
+      </Box>
+    )
+  })
+}
+
+function drawList (ui: Ui, list: DrawnItem[], width: number, targets: Target[], parts: Map<number, number>): RenderElement[] {
+  const { Box, Text } = ui
+  return list.map((item, i) => {
+    const indent = widthOf(item.marker) + 1
+    return (
+      <Box flexDirection="row" marginTop={i > 0 && item.gap > 0 ? 1 : 0}>
+        <Box minWidth={indent} flexShrink={0}><Text>{item.marker}</Text></Box>
+        <Box flexDirection="column" width={width - indent}>
+          {drawRows(ui, wrap(item.runs, width - indent), width - indent, targets, parts)}
+          {drawList(ui, item.children, width - indent, targets, parts)}
+        </Box>
+      </Box>
+    )
+  })
+}
+
+/** The reply as the engine lays it out, its bullet and its blocks, with the paths in it links. */
+function draw (ui: Ui, e: Message, plan: Plan, bullet: string) {
+  const { Box, Markdown, Text } = ui
+  const width = Math.max(10, (e.viewport?.columns ?? 80) - BULLET_COLUMNS)
+  const parts = new Map<number, number>()
+  return (
+    <Box flexDirection="row">
+      <Box minWidth={BULLET_COLUMNS} flexShrink={0}>{e.props.isFirstOfReply && <Text color="text">{bullet}</Text>}</Box>
+      <Box flexDirection="column" width={width}>
+        {plan.parts.map((part, i) => {
+          const marginTop = i > 0 && part.gap > 0 ? 1 : 0
+          if (part.kind === 'markdown') return <Box marginTop={marginTop}><Markdown text={part.text} /></Box>
+          const drawn = part.kind === 'paragraph' ? drawRows(ui, wrap(part.runs, width), width, plan.targets, parts) : drawList(ui, part.items, width, plan.targets, parts)
+          return <Box flexDirection="column" marginTop={marginTop}>{drawn}</Box>
+        })}
+      </Box>
+    </Box>
+  )
+}
+
+/** The tree `next` drew with the engine's node in it swapped for `mine`: what other plugins drew around it stays. */
+function swap (drawn: RenderElement, mine: RenderElement): RenderElement {
+  let isSwapped = false
+  const walk = (node: unknown): unknown => {
+    if (isSwapped || node === null || typeof node !== 'object') return node
+    if (Array.isArray(node)) return node.map(walk)
+    const element = node as { type?: unknown; children?: unknown[] }
+    if (element.type === 'engine') {
+      isSwapped = true
+      return mine
+    }
+    return Array.isArray(element.children) ? { ...element, children: element.children.map(walk) } : node
+  }
+  const out = walk(drawn) as RenderElement
+  return isSwapped ? out : mine
+}
+
+/** Shows `path` in the system's file manager, selected; with `isOpening`, opens it instead. */
+async function reveal ($: Engine, path: string, isOpening: boolean) {
+  const run = (argv: string[]) => $.process.run(argv).catch(() => undefined)
+  if (await wslOf($)) {
+    const windows = (await run(['wslpath', '-w', path]))?.stdout.trim()
+    if (windows) await run(isOpening ? ['explorer.exe', windows] : ['explorer.exe', `/select,${windows}`])
+    return
+  }
+  const system = await platformOf($)
+  if (system === 'macos') {
+    await run(isOpening ? ['open', path] : ['open', '-R', path])
+    return
+  }
+  if (system === 'windows') {
+    const windows = path.replaceAll('/', '\\')
+    await run(isOpening ? ['explorer', windows] : ['explorer', `/select,${windows}`])
+    return
+  }
+  if (isOpening) {
+    await run(['xdg-open', path])
+    return
+  }
+  // The desktop's file manager selects it where it answers FileManager1; else its folder opens.
+  const uri = `file://${path.split('/').map(encodeURIComponent).join('/')}`
+  const shown = await run(['dbus-send', '--session', '--print-reply', '--dest=org.freedesktop.FileManager1', '/org/freedesktop/FileManager1', 'org.freedesktop.FileManager1.ShowItems', `array:string:${uri}`, 'string:'])
+  if (shown?.exitCode !== 0) await run(['xdg-open', path.slice(0, path.lastIndexOf('/')) || '/'])
+}
+
+/**
+ * Shows `path` in a window by the pointer till `closeWindow`. The program says `.` ten times a
+ * second, so the loop wakes to see it was closed, and leaving the loop ends the program. One that
+ * ends without having shown a window, on a path that is there, says the system shows none: from
+ * then on the terminal shows the cards.
+ */
+async function openWindow ($: Engine, path: string) {
+  closeWindow()
+  const opening = { path, isOpen: true }
+  window = opening
+  const env = { QUICK_PEEK_FILE: path, QUICK_PEEK_SIZE: String(WINDOW_SIZE), QUICK_PEEK_LIFE: String(WINDOW_LIFE), QUICK_PEEK_HINT: 'click: show in Finder · ⌥ click: open' }
+  let isShown = false
+  let said = ''
+  try {
+    for await (const { text } of $.process.spawn({ argv: ['osascript', '-l', 'JavaScript', '-e', MACOS], env })) {
+      if (said.length < 2000) said += text
+      if (/^shown$/m.test(text)) isShown = true
+      if (!opening.isOpen) break
+    }
+  } catch (error) {
+    said += error instanceof Error ? error.message : String(error)
+  }
+  if (window === opening) window = undefined
+  if (isShown || !opening.isOpen || /^error: not there/m.test(said)) return
+  $.ui.log(`quick-peek: no window (${said.replace(/\.\n/g, '').trim().slice(0, 300) || 'the program could not start'}); the terminal shows the cards`, { to: 'debug' })
+  windowing = false
+  plans.clear()
+}
+
+function closeWindow () {
+  if (window) window.isOpen = false
+  window = undefined
+}
+
+/** The pointer came onto a part of `path` (`target`, the part's address): its preview opens, unless it is open. */
+function over ($: Engine, path: string, target: string) {
+  const isOpen = hovered?.path === path && window?.path === path && window.isOpen
+  hovered = { path, target }
+  if (isOpen || !windowing) return
+  void openWindow($, path)
+}
+
+/** The pointer left a part: the preview closes, unless the pointer is already on another part of it. */
+function off (target: string) {
+  if (hovered?.target !== target) return
+  hovered = undefined
+  closeWindow()
+}
+
+export const register: Register = (on, options) => {
+  on('session.start', async ($, e, next) => {
+    const result = await next(e)
+    const [system, sshConnection, sshTty] = await Promise.all([platformOf($), $.env.get('SSH_CONNECTION'), $.env.get('SSH_TTY')])
+    // A window opens on the desktop the session runs on: not over SSH, where that is another machine's.
+    windowing = options.window !== false && e.isInteractive && system === 'macos' && sshConnection === undefined && sshTty === undefined
+    plans.clear()
+    stats.clear()
+    return result
+  })
+
+  on('session.end', ($, e, next) => {
+    hovered = undefined
+    closeWindow()
+    return next(e)
+  })
+
+  // Typing or sending a prompt closes a preview: what is under the pointer may move.
+  on('prompt.edit', ($, e, next) => {
+    if (hovered) {
+      hovered = undefined
+      closeWindow()
+    }
+    return next(e)
+  })
+
+  on('prompt.submit', ($, e, next) => {
+    hovered = undefined
+    closeWindow()
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // A part of a path says when the pointer comes onto it and leaves it: its preview opens and
+  // closes. Clicked, the path shows in the file manager; alt-clicked, it opens.
+  on('ui.message', async ($, e, next) => {
+    const result = await next(e)
+    if (!e.element.startsWith('path:')) return result
+    const data = e.data as { path?: unknown; isOver?: unknown; isClicked?: unknown; isAlt?: unknown } | null
+    if (typeof data?.path !== 'string') return result
+    const target = `${e.requestId}/${e.element}`
+    if (data.isClicked === true) {
+      hovered = undefined
+      closeWindow()
+      void reveal($, data.path, data.isAlt === true)
+      return result
+    }
+    if (data.isOver === true) over($, data.path, target)
+    else off(target)
+    return result
+  })
+
+  // A reply that names a path that leads somewhere: the mod draws it, its bullet, its blocks the
+  // engine's Markdown draws, and the paragraphs and lists that name paths, the paths links. Off
+  // fullscreen the terminal reports no pointer: the engine draws it as it is.
+  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    if (e.surface !== 'terminal' || e.viewport?.isFullscreen !== true || e.props.isSummary) return next(e)
+    const plan = await planOf($, e.props.text).catch(() => null)
+    if (!plan) return next(e)
+    const drawn = await next(e)
+    const bullet = (await platformOf($)) === 'macos' ? BULLET.macos : BULLET.other
+    return swap(drawn, draw($.ui.resolve(e), e, plan, bullet))
+  })
+}
