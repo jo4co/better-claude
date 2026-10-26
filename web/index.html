@@ -196,8 +196,9 @@
       .plugin:is(:hover, :has(:focus-visible)) .pointer { animation-name: glide; }
       .plugin:is(:hover, :has(:focus-visible)) .frame { animation-name: tapped; }
       .plugin:is(:hover, :has(:focus-visible)) .sun { animation-name: rise; }
-      /* Sub Meter and Commit run on strips: the needle revs and the dial fills after it; a light runs
-         from the first commit up the line and along the branch */
+      /* Sub Meter, Commit and Quick Peek run on strips: the needle revs and the dial fills after it; a
+         light runs from the first commit up the line and along the branch; the compass needle swings
+         round, wavers and finds north */
       /* Narrator: the speaker thumps, and a wave goes out with each thump */
       .plugin:is(:hover, :has(:focus-visible)) :is(.speaker, [class^="wave-"]) { animation-duration: 1.2s; }
       .plugin:is(:hover, :has(:focus-visible)) .speaker { animation-name: thump; }
@@ -302,6 +303,57 @@
     }
     .image-window[hidden] { display: none; }
     .image-window img { display: block; width: min(480px, calc(100vw - 44px)); height: auto; }
+    /* Quick Peek: the reply as the terminal draws it, its paths links in the color of inline code. The
+       pointer on one underlines it and opens its preview by the pointer, as the mod's window does on
+       macOS: Quick Look's thumbnail, then the name, kind, size and age in the system's own type. A
+       click shows it selected in a Finder window. */
+    #path-demo .reply { padding-left: 2ch; text-indent: -2ch; }
+    #path-demo .item { padding-left: 4ch; text-indent: -2ch; }
+    .path-link { color: #b1b9f9; cursor: pointer; }
+    .path-link:hover, .path-link[aria-expanded="true"] { text-decoration: underline; text-underline-offset: 3px; }
+    .path-window, .finder { font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+    .path-window {
+      position: fixed; top: 0; left: 0; z-index: 10;
+      width: min(304px, calc(100vw - 16px));
+      padding: 12px;
+      border-radius: 10px;
+      background: rgba(40, 40, 42, .72);
+      -webkit-backdrop-filter: blur(24px) saturate(1.6);
+      backdrop-filter: blur(24px) saturate(1.6);
+      box-shadow: 0 0 0 .5px rgba(255, 255, 255, .16), 0 2px 8px rgba(0, 0, 0, .35), 0 22px 56px rgba(0, 0, 0, .55);
+      color: rgba(255, 255, 255, .55);
+      pointer-events: none;
+    }
+    .path-window[hidden], .path-thumb[hidden], .finder[hidden] { display: none; }
+    .path-thumb { display: block; width: 100%; height: auto; margin: 0 0 10px; border-radius: 3px; }
+    .path-window p { margin: 3px 0 0; }
+    .path-window .path-name { margin: 0; color: #fff; font-size: 13px; font-weight: 600; }
+    .path-window .path-where, .path-window .path-hint { color: rgba(255, 255, 255, .32); }
+    .path-window .path-hint { font-size: 10px; }
+    .finder {
+      position: fixed; z-index: 12;
+      width: min(300px, calc(100vw - 16px));
+      border-radius: 10px;
+      overflow: hidden;
+      background: #1e1e1e;
+      box-shadow: 0 0 0 .5px rgba(255, 255, 255, .2), 0 2px 8px rgba(0, 0, 0, .35), 0 22px 56px rgba(0, 0, 0, .6);
+      color: #dcdcdc; font-size: 13px;
+      animation: finder-in .2s var(--ease);
+    }
+    @keyframes finder-in { from { opacity: 0; transform: scale(.96); } }
+    @media (prefers-reduced-motion: reduce) { .finder { animation: none; } }
+    .finder-bar { position: relative; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; background: #2a2a2a; border-bottom: 1px solid #111; }
+    .finder-bar i, .finder-close { width: 12px; height: 12px; padding: 0; border: 0; border-radius: 50%; }
+    .finder-close { position: relative; z-index: 1; background: #ff5f57; cursor: pointer; }
+    .finder-bar i:nth-of-type(1) { background: #febc2e; }
+    .finder-bar i:nth-of-type(2) { background: #28c840; }
+    .finder-bar span { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 600; color: #e6e6e6; pointer-events: none; }
+    .finder-files { margin: 0; padding: 6px; list-style: none; }
+    .finder-files li { display: flex; align-items: center; gap: 8px; padding: 2px 8px; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .finder-files li[aria-selected="true"] { background: #0a5fd6; color: #fff; }
+    .finder-files i { flex: none; width: 12px; height: 15px; border-radius: 2px; background: #d8d8d8; }
+    .finder-files .video { background: linear-gradient(#6a2a8c, #22092f); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3); }
+    .finder-foot { margin: 0; padding: 4px 12px 7px; border-top: 1px solid #2a2a2a; color: #8a8a8a; font-size: 11px; text-align: center; }
     /* Narrator: the switch at the footer's right end, green on and gray off, blue while it speaks with
        a lighter blue sweeping across it, inverted under the pointer as the terminal draws a control in
        focus. What it says lights up as it is said. */
@@ -576,6 +628,7 @@
 
       <section class="install" aria-label="Install">
         <ul class="picks">
+          <li><button type="button" class="pick" data-plugin="quick-peek" aria-pressed="true">Quick Peek</button></li>
           <li><button type="button" class="pick" data-plugin="image-preview" aria-pressed="true">Image Preview</button></li>
           <li><button type="button" class="pick" data-plugin="sub-meter" aria-pressed="true">Sub Meter</button></li>
           <li><button type="button" class="pick" data-plugin="context-meter" aria-pressed="true">Context Meter</button></li>
@@ -599,6 +652,18 @@
     </header>
 
     <ol class="plugins">
+      <li class="plugin">
+        <div class="meta"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="#5e5e5e" d="M5 0h6v1h-6zM3 1h2v1h-2zM7 1h2v1h-2zM11 1h2v1h-2zM2 2h1v1h-1zM13 2h1v1h-1zM1 3h1v1h-1zM14 3h1v1h-1zM1 4h1v1h-1zM14 4h1v1h-1zM0 5h1v1h-1zM15 5h1v1h-1zM0 6h1v1h-1zM15 6h1v1h-1zM0 7h2v1h-2zM14 7h2v1h-2zM0 8h2v1h-2zM14 8h2v1h-2zM0 9h1v1h-1zM15 9h1v1h-1zM0 10h1v1h-1zM15 10h1v1h-1zM1 11h1v1h-1zM14 11h1v1h-1zM1 12h1v1h-1zM14 12h1v1h-1zM2 13h1v1h-1zM13 13h1v1h-1zM3 14h2v1h-2zM7 14h2v1h-2zM11 14h2v1h-2zM5 15h6v1h-6z"/><g class="strip" style="--n: 12; --d: 1.8s"><path fill="#d77757" d="M8 3h1v1h-1zM136 3h1v1h-1zM168 3h1v1h-1zM7 4h2v1h-2zM26 4h2v1h-2zM116 4h1v1h-1zM135 4h2v1h-2zM154 4h2v1h-2zM167 4h2v1h-2zM180 4h1v1h-1zM7 5h2v1h-2zM25 5h2v1h-2zM116 5h2v1h-2zM135 5h2v1h-2zM153 5h2v1h-2zM167 5h2v1h-2zM180 5h2v1h-2zM7 6h2v1h-2zM25 6h1v1h-1zM117 6h2v1h-2zM135 6h2v1h-2zM153 6h1v1h-1zM167 6h2v1h-2zM181 6h2v1h-2zM41 7h3v1h-3zM99 7h4v1h-4zM41 8h4v1h-4zM100 8h3v1h-3zM57 9h2v1h-2zM71 9h2v1h-2zM86 9h1v1h-1zM58 10h2v1h-2zM71 10h2v1h-2zM85 10h2v1h-2zM59 11h1v1h-1zM71 11h2v1h-2zM84 11h2v1h-2zM71 12h1v1h-1z"/><path fill="#f2a385" d="M7 3h1v1h-1zM27 3h1v1h-1zM135 3h1v1h-1zM155 3h1v1h-1zM167 3h1v1h-1zM115 4h1v1h-1zM179 4h1v1h-1zM44 7h1v1h-1zM99 8h1v1h-1zM60 11h1v1h-1zM72 12h1v1h-1zM84 12h1v1h-1z"/><path fill="#ececec" d="M71 3h2v1h-2zM91 3h1v1h-1zM51 4h2v1h-2zM71 4h2v1h-2zM90 4h2v1h-2zM52 5h2v1h-2zM71 5h2v1h-2zM89 5h2v1h-2zM53 6h2v1h-2zM71 6h2v1h-2zM89 6h1v1h-1zM35 7h4v1h-4zM105 7h4v1h-4zM35 8h4v1h-4zM105 8h4v1h-4zM7 9h2v1h-2zM22 9h1v1h-1zM121 9h2v1h-2zM135 9h2v1h-2zM150 9h1v1h-1zM167 9h2v1h-2zM185 9h2v1h-2zM7 10h2v1h-2zM21 10h2v1h-2zM122 10h2v1h-2zM135 10h2v1h-2zM149 10h2v1h-2zM167 10h2v1h-2zM186 10h2v1h-2zM7 11h2v1h-2zM20 11h2v1h-2zM123 11h2v1h-2zM135 11h2v1h-2zM148 11h2v1h-2zM167 11h2v1h-2zM187 11h2v1h-2zM7 12h2v1h-2zM20 12h1v1h-1zM135 12h2v1h-2zM148 12h1v1h-1zM167 12h2v1h-2z"/></g><path fill="#9b9b9b" d="M7 7h2v2h-2z"/></svg><h2>Quick Peek</h2><ul class="links"><li><a data-panel="source" href="https://github.com/midudev/better-claude/tree/main/plugins/quick-peek"><svg aria-hidden="true"><use href="#i-source"/></svg><span>source</span></a></li><li><a data-panel="docs" href="https://github.com/midudev/better-claude/blob/main/plugins/quick-peek/README.md"><svg aria-hidden="true"><use href="#i-docs"/></svg><span>docs</span></a></li><li><button type="button" data-install="quick-peek"><svg aria-hidden="true"><use class="arrow" href="#i-arrow"/><use class="tray" href="#i-tray"/><use class="check" href="#i-check"/></svg><span>install</span></button></li></ul></div>
+        <div class="body">
+          <p>The paths in Claude's replies become links. Hover one and a preview opens by the pointer: a video's frame, an image, a document's first page, with its kind, size and age. Click it and Finder opens with the file selected; option-click opens the file itself.</p>
+          <div class="demo" role="group" aria-label="Demo" id="path-demo">
+            <p class="line reply"><span class="accent">⏺</span> I made two versions of the opening. Pick the one you like:</p>
+            <p class="line item">- <span class="path-link" role="button" tabindex="0" data-file="draft" data-name="draft.mp4" data-details="MPEG-4 movie · 41.1 MB · 2 minutes ago">/Users/<wbr>you/<wbr>lava-lamps/<wbr>review/<wbr>draft.mp4</span></p>
+            <p class="line item">- <span class="path-link" role="button" tabindex="0" data-file="journey" data-name="draft-01-journey.mp4" data-details="MPEG-4 movie · 38.6 MB · 1 minute ago">/Users/<wbr>you/<wbr>lava-lamps/<wbr>review/<wbr>draft-01-journey.mp4</span></p>
+          </div>
+        </div>
+      </li>
+
       <li class="plugin">
         <div class="meta"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="#9b9b9b" d="M5 7h1v1h-1zM4 8h3v1h-3zM3 9h5v1h-5zM11 9h1v1h-1zM2 10h7v1h-7zM10 10h3v1h-3zM1 11h12v1h-12z"/><path fill="#262626" d="M1 2h12v5h-12zM1 7h4v1h-4zM6 7h7v1h-7zM1 8h3v1h-3zM7 8h6v1h-6zM1 9h2v1h-2zM8 9h3v1h-3zM12 9h1v1h-1zM1 10h1v1h-1zM9 10h1v1h-1z"/><path class="frame" fill="#ececec" d="M0 1h14v1h-14zM0 2h1v10h-1zM13 2h1v10h-1zM0 12h14v1h-14z"/><g class="sun"><path fill="#d77757" d="M9 3h2v1h-2zM8 4h1v1h-1zM10 4h2v1h-2zM8 5h4v1h-4zM9 6h2v1h-2z"/><path fill="#f2a385" d="M9 4h1v1h-1z"/></g><g class="pointer"><path class="cut" d="M8 7h1v1h-1zM7 8h1v7h-1zM9 8h1v1h-1zM10 9h1v1h-1zM11 10h1v1h-1zM12 11h1v1h-1zM13 12h1v1h-1zM11 13h2v1h-2zM9 14h1v1h-1zM12 14h1v1h-1zM8 15h1v1h-1zM10 15h1v1h-1zM13 15h1v1h-1zM11 16h2v1h-2z"/><path fill="#ececec" d="M8 8h1v1h-1zM8 9h2v1h-2zM8 10h3v1h-3zM8 11h4v1h-4zM8 12h5v1h-5zM8 13h3v1h-3zM8 14h1v1h-1zM10 14h2v1h-2zM11 15h2v1h-2z"/></g></svg><h2>Image Preview</h2><ul class="links"><li><a data-panel="source" href="https://github.com/midudev/better-claude/tree/main/plugins/image-preview"><svg aria-hidden="true"><use href="#i-source"/></svg><span>source</span></a></li><li><a data-panel="docs" href="https://github.com/midudev/better-claude/blob/main/plugins/image-preview/README.md"><svg aria-hidden="true"><use href="#i-docs"/></svg><span>docs</span></a></li><li><button type="button" data-install="image-preview"><svg aria-hidden="true"><use class="arrow" href="#i-arrow"/><use class="tray" href="#i-tray"/><use class="check" href="#i-check"/></svg><span>install</span></button></li></ul></div>
         <div class="body">
@@ -764,6 +829,25 @@
 
   <div class="image-window" id="image-window" role="tooltip" hidden>
     <img src="screenshot.svg" width="480" height="300" alt="A screenshot of a pricing page with three plans: Free, Pro and Team">
+  </div>
+
+  <div class="path-window" id="path-window" role="tooltip" hidden>
+    <svg class="path-thumb" data-for="draft" viewBox="0 0 320 180" width="320" height="180" aria-hidden="true"><defs><linearGradient id="pf-liquid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#43185c"/><stop offset="1" stop-color="#12051c"/></linearGradient><radialGradient id="pf-wax" cx=".38" cy=".32" r=".75"><stop offset="0" stop-color="#ffb48c"/><stop offset=".5" stop-color="#e2683f"/><stop offset="1" stop-color="#9c321b"/></radialGradient><filter id="pf-goo"><feGaussianBlur stdDeviation="7"/><feColorMatrix values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 24 -10"/></filter><radialGradient id="pf-glow" cx=".5" cy=".55" r=".6"><stop offset="0" stop-color="#e2683f" stop-opacity=".35"/><stop offset="1" stop-color="#e2683f" stop-opacity="0"/></radialGradient></defs><rect width="320" height="180" fill="url(#pf-liquid)"/><rect width="320" height="180" fill="url(#pf-glow)"/><g filter="url(#pf-goo)" fill="url(#pf-wax)"><circle cx="158" cy="62" r="36"/><circle cx="166" cy="104" r="9"/><circle cx="172" cy="138" r="30"/><circle cx="62" cy="150" r="16"/><circle cx="268" cy="34" r="11"/><circle cx="252" cy="152" r="21"/><circle cx="40" cy="38" r="7"/></g><ellipse cx="145" cy="48" rx="11" ry="7" fill="#fff" fill-opacity=".28" transform="rotate(-25 145 48)"/><ellipse cx="160" cy="124" rx="8" ry="5" fill="#fff" fill-opacity=".22" transform="rotate(-25 160 124)"/><path d="M26-10C8 60 8 120 26 190" fill="none" stroke="#fff" stroke-opacity=".16" stroke-width="12"/><path d="M300-10c14 70 14 130 0 200" fill="none" stroke="#000" stroke-opacity=".35" stroke-width="22"/></svg>
+    <svg class="path-thumb" data-for="journey" viewBox="0 0 320 180" width="320" height="180" aria-hidden="true" hidden><defs><linearGradient id="pf-wall" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#241329"/><stop offset="1" stop-color="#0b0710"/></linearGradient><linearGradient id="pf-lamp" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a1f78"/><stop offset="1" stop-color="#26093a"/></linearGradient><radialGradient id="pf-halo"><stop offset="0" stop-color="#e2683f" stop-opacity=".22"/><stop offset="1" stop-color="#e2683f" stop-opacity="0"/></radialGradient><radialGradient id="pf-wax-b" cx=".38" cy=".32" r=".75"><stop offset="0" stop-color="#ffb48c"/><stop offset=".5" stop-color="#e2683f"/><stop offset="1" stop-color="#9c321b"/></radialGradient></defs><rect width="320" height="180" fill="url(#pf-wall)"/><path fill="#07040a" d="M0 150L320 128V180H0Z"/><rect x="0" y="40" width="90" height="1.5" fill="#fff" fill-opacity=".07"/><rect x="60" y="70" width="120" height="1.5" fill="#fff" fill-opacity=".07"/><rect x="10" y="112" width="70" height="1.5" fill="#fff" fill-opacity=".07"/><rect x="150" y="30" width="80" height="1.5" fill="#fff" fill-opacity=".07"/><rect x="180" y="96" width="60" height="1.5" fill="#fff" fill-opacity=".07"/><rect x="0" y="150" width="50" height="1.5" fill="#fff" fill-opacity=".07"/><ellipse fill="url(#pf-halo)" cx="266" cy="132.9" rx="20.2" ry="28.2"/><path fill="#2a2a30" d="M258.9 158L259.7 148.8H272.3L273.1 158Z"/><path fill="url(#pf-lamp)" d="M259.7 148.8C257.2 132.9 263.3 120.5 263.3 113.5H268.7C268.7 120.5 274.8 132.9 272.3 148.8Z"/><circle fill="url(#pf-wax-b)" cx="266" cy="141" r="4.2"/><circle fill="url(#pf-wax-b)" cx="264.1" cy="127.9" r="2.7"/><circle fill="url(#pf-wax-b)" cx="267.5" cy="121.2" r="1.9"/><path fill="#fff" fill-opacity=".14" d="M261 147.1C259.3 132.9 263.7 120.5 264.1 114.7H264.9C264.5 122.3 261 132.9 262.2 147.1Z"/><path fill="#2a2a30" d="M263.3 113.5L263.1 108.4H268.9L268.7 113.5Z"/><ellipse fill="url(#pf-halo)" cx="212" cy="130.1" rx="28.8" ry="40.3"/><path fill="#2a2a30" d="M201.8 166L203 152.8H221L222.2 166Z"/><path fill="url(#pf-lamp)" d="M203 152.8C199.4 130.1 208.1 112.5 208.1 102.4H215.9C215.9 112.5 224.6 130.1 221 152.8Z"/><circle fill="url(#pf-wax-b)" cx="212" cy="141.7" r="6"/><circle fill="url(#pf-wax-b)" cx="209.3" cy="119" r="3.9"/><circle fill="url(#pf-wax-b)" cx="214.2" cy="115.5" r="2.7"/><path fill="#fff" fill-opacity=".14" d="M204.8 150.4C202.4 130.1 208.7 112.5 209.3 104.2H210.5C209.9 115 204.8 130.1 206.6 150.4Z"/><path fill="#2a2a30" d="M208.1 102.4L207.8 95.2H216.2L215.9 102.4Z"/><ellipse fill="url(#pf-halo)" cx="138" cy="123.4" rx="42.2" ry="59.1"/><path fill="#2a2a30" d="M123 176L124.8 156.6H151.2L153 176Z"/><path fill="url(#pf-lamp)" d="M124.8 156.6C119.5 123.4 132.3 97.5 132.3 82.7H143.7C143.7 97.5 156.5 123.4 151.2 156.6Z"/><circle fill="url(#pf-wax-b)" cx="138" cy="140.4" r="8.8"/><circle fill="url(#pf-wax-b)" cx="134" cy="114.5" r="5.7"/><circle fill="url(#pf-wax-b)" cx="141.2" cy="98.2" r="4"/><path fill="#fff" fill-opacity=".14" d="M127.4 153.1C123.9 123.4 133.2 97.5 134 85.4H135.8C134.9 101.2 127.4 123.4 130.1 153.1Z"/><path fill="#2a2a30" d="M132.3 82.7L131.8 72.2H144.2L143.7 82.7Z"/><ellipse fill="url(#pf-halo)" cx="32" cy="118.3" rx="62.4" ry="87.4"/><path fill="#2a2a30" d="M9.9 196L12.5 167.4H51.5L54.1 196Z"/><path fill="url(#pf-lamp)" d="M12.5 167.4C4.7 118.3 23.5 80 23.5 58.2H40.5C40.5 80 59.3 118.3 51.5 167.4Z"/><circle fill="url(#pf-wax-b)" cx="32" cy="143.4" r="13"/><circle fill="url(#pf-wax-b)" cx="26.1" cy="89.9" r="8.5"/><circle fill="url(#pf-wax-b)" cx="36.7" cy="88.8" r="5.9"/><path fill="#fff" fill-opacity=".14" d="M16.4 162.2C11.2 118.3 24.8 80 26.1 62.1H28.7C27.4 85.5 16.4 118.3 20.3 162.2Z"/><path fill="#2a2a30" d="M23.5 58.2L22.9 42.6H41.1L40.5 58.2Z"/></svg>
+    <p class="path-name" id="path-name">draft.mp4</p>
+    <p id="path-details">MPEG-4 movie · 41.1 MB · 2 minutes ago</p>
+    <p class="path-where">~/lava-lamps/review</p>
+    <p class="path-hint">click: show in Finder · ⌥ click: open</p>
+  </div>
+
+  <div class="finder" id="finder" role="dialog" aria-label="Finder: review" hidden>
+    <div class="finder-bar"><button type="button" class="finder-close" id="finder-close" aria-label="Close"></button><i></i><i></i><span>review</span></div>
+    <ul class="finder-files">
+      <li data-file="journey"><i class="video"></i>draft-01-journey.mp4</li>
+      <li data-file="draft"><i class="video"></i>draft.mp4</li>
+      <li><i></i>notes.md</li>
+    </ul>
+    <p class="finder-foot">3 items</p>
   </div>
 
   <script>
@@ -1084,6 +1168,77 @@
       chip.addEventListener('blur', close)
       addEventListener('keydown', e => { if (e.key === 'Escape') close() })
       addEventListener('scroll', close, { passive: true })
+
+      // Quick Peek: the pointer on a path opens its preview where the mod's window opens, by the
+      // pointer; leaving it closes it. A click shows the file selected in a Finder window, there too.
+      const pathWindow = $('#path-window')
+      const finder = $('#finder')
+      const pathLinks = $$('.path-link')
+      let previewed
+      let pointerType = 'mouse'
+      // Above the point and to its right; under it, or to its left, where there is no room.
+      function byPointer (box, x, y) {
+        const { width, height } = box.getBoundingClientRect()
+        let left = x + GAP
+        let top = y - GAP - height
+        if (top < EDGE) top = y + GAP
+        if (left + width > innerWidth - EDGE) left = x - GAP - width
+        return {
+          left: Math.round(Math.max(EDGE, Math.min(left, innerWidth - width - EDGE))),
+          top: Math.round(Math.max(EDGE, Math.min(top, innerHeight - height - EDGE)))
+        }
+      }
+      function preview (link, x, y) {
+        previewed?.setAttribute('aria-expanded', 'false')
+        previewed = link
+        link.setAttribute('aria-expanded', 'true')
+        $('#path-name').textContent = link.dataset.name
+        $('#path-details').textContent = link.dataset.details
+        // An svg has no `hidden` property: the attribute is set itself.
+        $$('.path-thumb', pathWindow).forEach(thumb => thumb.toggleAttribute('hidden', thumb.dataset.for !== link.dataset.file))
+        pathWindow.hidden = false
+        const { left, top } = byPointer(pathWindow, x, y)
+        pathWindow.style.transform = `translate(${left}px, ${top}px)`
+      }
+      function unpreview () {
+        pathWindow.hidden = true
+        previewed?.setAttribute('aria-expanded', 'false')
+        previewed = undefined
+      }
+      function reveal (link, x, y) {
+        unpreview()
+        $$('.finder-files li', finder).forEach(row => row.setAttribute('aria-selected', String(row.dataset.file === link.dataset.file)))
+        finder.hidden = false
+        const { left, top } = byPointer(finder, x, y)
+        finder.style.left = `${left}px`
+        finder.style.top = `${top}px`
+      }
+      const closeFinder = () => { finder.hidden = true }
+      const corner = link => { const box = link.getBoundingClientRect(); return [box.left + 24, box.top] }
+      pathLinks.forEach(link => {
+        link.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse' && finder.hidden) preview(link, e.clientX, e.clientY) })
+        link.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && previewed === link) unpreview() })
+        // Closed by a scroll or a click while the pointer stayed: a move on the path opens it again.
+        link.addEventListener('pointermove', e => { if (e.pointerType === 'mouse' && pathWindow.hidden && finder.hidden) preview(link, e.clientX, e.clientY) })
+        link.addEventListener('pointerdown', e => { pointerType = e.pointerType })
+        // No pointer to hover with: a first tap previews, a second shows it in Finder.
+        link.addEventListener('click', e => {
+          if (pointerType !== 'mouse' && previewed !== link) preview(link, e.clientX, e.clientY)
+          else reveal(link, e.clientX, e.clientY)
+          pointerType = 'mouse'
+        })
+        link.addEventListener('keydown', e => {
+          if (e.key !== 'Enter' && e.key !== ' ') return
+          e.preventDefault()
+          reveal(link, ...corner(link))
+        })
+        link.addEventListener('focus', () => { if (link.matches(':focus-visible')) preview(link, ...corner(link)) })
+        link.addEventListener('blur', () => { if (previewed === link) unpreview() })
+      })
+      $('#finder-close').addEventListener('click', closeFinder)
+      addEventListener('pointerdown', e => { if (!finder.hidden && !finder.contains(e.target) && !e.target.closest?.('.path-link')) closeFinder() })
+      addEventListener('keydown', e => { if (e.key === 'Escape') { unpreview(); closeFinder() } })
+      addEventListener('scroll', () => { unpreview(); closeFinder() }, { passive: true })
       // Narrator: the switch turns it on and Claude says what the turn did. While it speaks the switch
       // reads narrating, and a click stops it, the narrator still on. A browser cannot reach the Siri
       // voices, so the clip was recorded with the best one (narrator/record.swift); where it cannot
