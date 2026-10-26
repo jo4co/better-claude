@@ -1,18 +1,24 @@
 // The program that previews a path in a window of its own, by the pointer, outside the terminal:
 // macOS's, run by `osascript` with what it needs in the environment (QUICK_PEEK_FILE, the path;
 // QUICK_PEEK_LIFE, how many seconds at most it stays; QUICK_PEEK_HINT, the line that says what a
-// click does). It writes `shown` once the window is up, or a line starting `error`, then a `.`
-// every tenth of a second, so the one reading it is woken to end it, and it ends when nobody
-// reads. The window never takes the focus or the pointer: the terminal keeps both.
+// click does; QUICK_PEEK_CODE, for a file of code or text, the lines it shows as JSON, an
+// `Excerpt` without its source). It writes `shown` once the window is up, or a line starting
+// `error`, then a `.` every tenth of a second, so the one reading it is woken to end it, and it
+// ends when nobody reads. The window never takes the focus or the pointer: the terminal keeps both.
 
 /**
- * macOS: JavaScript for Automation drawing an AppKit panel. A file shows its Quick Look thumbnail
+ * macOS: JavaScript for Automation drawing an AppKit panel. A file of code or text shows its
+ * lines, coloured, numbered, the one the path names lit; any other file its Quick Look thumbnail
  * (a video's frame, an image, a document's first page), else its icon; a folder its icon and its
- * first entries. Under it, the name, the kind, size and age as the system words them, and where it is.
+ * first entries. Under it, the name, the kind, size and age as the system words them (a language's
+ * name, and its lines, for code), and where it is.
  */
 export const MACOS = String.raw`
 ObjC.import('Cocoa')
 ObjC.import('QuickLook')
+
+// The colours of a token's kind (code.ts's Kind), on the panel's dark backdrop.
+const PALETTE = { k: '569CD6', s: 'CE9178', n: 'B5CEA8', c: '6A9955', t: '4EC9B0', a: '9CDCFE', f: 'DCDCAA', '': 'D4D4D4' }
 
 function run () {
   const env = $.NSProcessInfo.processInfo.environment
@@ -42,11 +48,51 @@ function run () {
   const values = url.resourceValuesForKeysError($(keys), $())
   const value = key => (values.isNil() ? $() : values.objectForKey(key))
 
-  // The picture: Quick Look's thumbnail, else the icon Finder shows.
+  // The picture: a text file's lines; else Quick Look's thumbnail; else the icon Finder shows.
+  const code = read('QUICK_PEEK_CODE') ? JSON.parse(read('QUICK_PEEK_CODE')) : undefined
   let image = $()
   let width = 0
   let height = 0
-  if (!folder) {
+  let lines = []
+  const inset = 8
+  if (code) {
+    const mono = $.NSFont.monospacedSystemFontOfSizeWeight(11, 0)
+    const inks = {}
+    for (const kind in PALETTE) {
+      const hex = PALETTE[kind]
+      inks[kind] = $.NSColor.colorWithSRGBRedGreenBlueAlpha(parseInt(hex.slice(0, 2), 16) / 255, parseInt(hex.slice(2, 4), 16) / 255, parseInt(hex.slice(4, 6), 16) / 255, 1)
+    }
+    const gutter = String(code.first + code.lines.length - 1).length
+    // A line wider than the plate ends in an ellipsis, its letters not drawn closer: the columns stay.
+    const cut = $.NSMutableParagraphStyle.alloc.init
+    cut.lineBreakMode = 4
+    cut.allowsDefaultTighteningForTruncation = false
+    lines = code.lines.map((tokens, i) => {
+      // JXA bridges no initWithString: here: the text is appended, then each piece coloured.
+      const text = $.NSMutableAttributedString.alloc.init
+      const add = (piece, ink) => {
+        const at = text.length
+        text.mutableString.appendString($(piece))
+        text.addAttributeValueRange($.NSForegroundColorAttributeName, ink, $.NSMakeRange(at, piece.length))
+      }
+      add(String(code.first + i).padStart(gutter) + '  ', $.NSColor.tertiaryLabelColor)
+      for (const [kind, piece] of tokens) add(piece, inks[kind] || inks[''])
+      if (tokens.length === 0) add(' ', inks[''])
+      text.addAttributeValueRange($.NSFontAttributeName, mono, $.NSMakeRange(0, text.length))
+      text.addAttributeValueRange($.NSParagraphStyleAttributeName, cut, $.NSMakeRange(0, text.length))
+      const field = $.NSTextField.labelWithAttributedString(text)
+      field.maximumNumberOfLines = 1
+      if (code.first + i === code.mark) {
+        field.drawsBackground = true
+        field.backgroundColor = $.NSColor.colorWithWhiteAlpha(1, 0.12)
+      }
+      return field
+    })
+    const widest = lines.reduce((most, field) => Math.max(most, field.sizeThatFits($.NSMakeSize(10000, 100)).width), 0)
+    width = Math.round(Math.min(Math.max(widest + inset * 2, 280), largest * 1.6))
+    height = lines.reduce((sum, field) => sum + Math.ceil(field.sizeThatFits($.NSMakeSize(10000, 100)).height), 0) + inset * 2
+  }
+  if (!folder && !code) {
     const thumbnail = $.QLThumbnailImageCreate($.kCFAllocatorDefault, url, $.CGSizeMake(largest * scale, largest * scale), $())
     if (thumbnail && !(thumbnail.isNil && thumbnail.isNil())) {
       image = $.NSImage.alloc.initWithCGImageSize(thumbnail, $.NSZeroSize)
@@ -54,7 +100,7 @@ function run () {
       height = image.size.height / scale
     }
   }
-  if (image.isNil() || width === 0) {
+  if (!code && (image.isNil() || width === 0)) {
     image = $.NSWorkspace.sharedWorkspace.iconForFile(path)
     width = height = folder ? 64 : 128
     image.size = $.NSMakeSize(width, height)
@@ -63,8 +109,10 @@ function run () {
   // The lines under it.
   const name = ObjC.unwrap(files.displayNameAtPath(path))
   const details = []
+  // A language's name over the system's kind, which may be another's (a .ts is a video's to it).
   const kind = value($.NSURLLocalizedTypeDescriptionKey)
-  if (!kind.isNil()) details.push(ObjC.unwrap(kind))
+  if (code) details.push(code.language)
+  else if (!kind.isNil()) details.push(ObjC.unwrap(kind))
   let entries = []
   if (folder) {
     const listed = files.contentsOfDirectoryAtPathError(path, $())
@@ -75,6 +123,7 @@ function run () {
   } else {
     const size = value($.NSURLFileSizeKey)
     if (!size.isNil()) details.push(ObjC.unwrap($.NSByteCountFormatter.stringFromByteCountCountStyle(size.longLongValue, 0)))
+    if (code) details.push(code.count === 1 ? '1 line' : code.count + ' lines')
   }
   const modified = value($.NSURLContentModificationDateKey)
   if (!modified.isNil()) {
@@ -153,10 +202,31 @@ function run () {
     at += row.frame.size.height + spacing
   }
   at += 10 - spacing
-  const view = $.NSImageView.alloc.initWithFrame($.NSMakeRect(pad + Math.round((inner - width) / 2), at, width, height))
-  view.image = image
-  view.imageScaling = 3
-  backdrop.addSubview(view)
+  const frame = $.NSMakeRect(pad + Math.round((inner - width) / 2), at, width, height)
+  if (code) {
+    // The lines on a darker plate, top first, each cut where the plate ends. A custom box paints
+    // it: a layer's colour, a CGColor, crashes JXA.
+    const plate = $.NSBox.alloc.initWithFrame(frame)
+    plate.boxType = 4
+    plate.titlePosition = 0
+    plate.borderWidth = 0
+    plate.cornerRadius = 6
+    plate.fillColor = $.NSColor.colorWithWhiteAlpha(0, 0.3)
+    plate.contentViewMargins = $.NSMakeSize(0, 0)
+    let top = height - inset
+    for (const field of lines) {
+      const tall = Math.ceil(field.sizeThatFits($.NSMakeSize(10000, 100)).height)
+      top -= tall
+      field.frame = $.NSMakeRect(inset, top, width - inset * 2, tall)
+      plate.addSubview(field)
+    }
+    backdrop.addSubview(plate)
+  } else {
+    const view = $.NSImageView.alloc.initWithFrame(frame)
+    view.image = image
+    view.imageScaling = 3
+    backdrop.addSubview(view)
+  }
   panel.contentView = backdrop
   if (read('QUICK_PEEK_DRY') === '1') { say('dry ' + Math.round(outer.width) + 'x' + Math.round(outer.height) + ' ' + rows.length + ' rows'); return }
   panel.orderFrontRegardless

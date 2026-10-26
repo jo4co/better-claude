@@ -4,12 +4,13 @@
 // shows the path in the file manager (opens it, with alt).
 import type { ClientModule } from 'claude-code'
 
-/** The part drawn, the path it belongs to, and the style of the text around it. */
-type Props = { label: string; path: string; bold?: boolean; italic?: boolean; strike?: boolean }
+/** The part drawn, the path it belongs to and the line it names, and the style of the text around it. */
+type Props = { label: string; path: string; line?: number; bold?: boolean; italic?: boolean; strike?: boolean }
 
 const REPEAT_MS = 50
 
 const Link: ClientModule<Props, { isOver: boolean; isPressed?: boolean }> = (props, surface) => {
+  const where = { path: props.path, ...(props.line !== undefined && { line: props.line }) }
   surface.onPointer(event => {
     // A click is the left button let go over the part it went down on.
     if (event.type === 'down') {
@@ -19,20 +20,20 @@ const Link: ClientModule<Props, { isOver: boolean; isPressed?: boolean }> = (pro
     if (event.type === 'up') {
       // A region not laid out yet (0 by 0) says nothing of where the pointer is.
       const isInside = surface.columns === 0 || (event.x >= 0 && event.y >= 0 && event.x < surface.columns && event.y < surface.rows)
-      if (surface.state?.isPressed && isInside) surface.post({ path: props.path, isOver: true, isClicked: true, ...(event.alt && { isAlt: true }) })
+      if (surface.state?.isPressed && isInside) surface.post({ ...where, isOver: true, isClicked: true, ...(event.alt && { isAlt: true }) })
       surface.setState({ isOver: isInside })
       return
     }
     // A move over the part says so again: a preview hidden while the pointer stayed comes back.
     const isOver = event.type !== 'leave'
-    surface.post({ path: props.path, isOver })
+    surface.post({ ...where, isOver })
     if (isOver !== (surface.state?.isOver ?? false)) surface.setState({ isOver, isPressed: surface.state?.isPressed })
     // Going straight from one part to the next, the leave and the enter post in one frame, and the
     // later replaces the other: the enter says so again a frame on.
     if (event.type === 'enter') {
       const stop = surface.every(REPEAT_MS, () => {
         stop()
-        if (surface.state?.isOver) surface.post({ path: props.path, isOver: true })
+        if (surface.state?.isOver) surface.post({ ...where, isOver: true })
       })
     }
   })

@@ -32,6 +32,12 @@ function clean (text: string) {
   return /[\w~]/.test(target) && target !== '~' ? target : undefined
 }
 
+/** The line a path's text names after it (`src/x.ts:12`, `src/x.ts:12:5`), if it names one. */
+export function lineOf (text: string) {
+  const line = text.trim().replace(TRAILING, '').match(LINE)?.[0]
+  return line === undefined ? undefined : Number(line.slice(1).split(':')[0])
+}
+
 /** The paths named in plain text, in order. */
 export function pathsIn (text: string): Found[] {
   const masked = text.replace(URL, match => ' '.repeat(match.length))

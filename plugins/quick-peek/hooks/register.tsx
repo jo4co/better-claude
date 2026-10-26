@@ -1,8 +1,10 @@
 import type { Elements, EngineInterface, EventOf, FsStat, Register, RenderElement } from 'claude-code'
 
+import { excerptOf, languageOf } from './code'
+import type { Excerpt } from './code'
 import { blocks, inline, items, markerOf, widthOf, wrap } from './markdown'
 import type { Item, Row, Run } from './markdown'
-import { pathOfSpan, pathsIn, resolve } from './paths'
+import { lineOf, pathOfSpan, pathsIn, resolve } from './paths'
 import { MACOS } from './window'
 
 type Engine = EngineInterface
@@ -10,8 +12,11 @@ type Ui = Elements['terminal']
 type Message = Extract<EventOf['ui.render'], { component: 'AssistantMessage', surface: 'terminal' }>
 type Platform = 'macos' | 'linux' | 'windows' | 'other'
 
-/** A path a reply names that leads somewhere: where it lands, and what is there. */
-type Target = { path: string; stat: FsStat }
+/**
+ * A path a reply names that leads somewhere: where it lands, what is there, and the line it names;
+ * with no window, the lines of code or text its card shows.
+ */
+type Target = { path: string; stat: FsStat; line?: number; code?: Excerpt }
 /** An item of a list the mod draws: its marker, its runs, the items under it, blank lines before it. */
 type DrawnItem = { marker: string; runs: Run[]; children: DrawnItem[]; gap: number }
 /** A part of a reply: drawn by the engine's Markdown, or by the mod, its paths links. */
@@ -33,16 +38,23 @@ const PLANS = 300
 // The longest side of the preview's picture, in points, and the most seconds the window stays.
 const WINDOW_SIZE = 360
 const WINDOW_LIFE = 60
+// The largest file of code or text read for its lines; the lines the window shows, the lines and
+// columns a card shows.
+const CODE_BYTES = 1024 * 1024
+const WINDOW_LINES = 20
+const CARD_LINES = 8
+const CARD_COLUMNS = 100
 
 const stats = new Map<string, { stat: FsStat | null; at: number }>()
 const plans = new Map<string, { plan: Plan | null; at: number }>()
+const excerpts = new Map<string, Excerpt | null>()
 let platform: Promise<Platform> | undefined
 let wsl: Promise<boolean> | undefined
 // Whether a hover opens a window by the pointer (macOS); else each path carries a card the
 // terminal reveals over it. The path the pointer is on, and the part it is on; the window open.
 let windowing = false
-let hovered: { path: string; target: string } | undefined
-let window: { path: string; isOpen: boolean } | undefined
+let hovered: { path: string; line: number | undefined; target: string } | undefined
+let window: { path: string; line: number | undefined; isOpen: boolean } | undefined
 
 /** The system the session runs on, asked once. */
 function platformOf ($: Engine) {
@@ -70,6 +82,23 @@ async function statOf ($: Engine, path: string) {
   return stats.get(path)!.stat
 }
 
+/**
+ * The `rows` lines a preview shows of the file at `path`, around `line` when it names one: null
+ * for a file that is no code nor text, too large, or holds none. Read again once the file changes.
+ */
+async function excerptAt ($: Engine, path: string, stat: FsStat, line: number | undefined, rows: number) {
+  const language = languageOf(path)
+  if (!language || stat.kind !== 'file' || stat.size > CODE_BYTES) return null
+  const key = `${path}\n${stat.size}\n${stat.mtimeMs}\n${line ?? 0}\n${rows}`
+  const known = excerpts.get(key)
+  if (known !== undefined) return known
+  const text = await $.fs.read(path).catch(() => undefined)
+  const excerpt = typeof text === 'string' ? excerptOf(text, language, line, rows) ?? null : null
+  if (excerpts.size >= PLANS) excerpts.delete(excerpts.keys().next().value!)
+  excerpts.set(key, excerpt)
+  return excerpt
+}
+
 /** A run cut where it names a path, each path a run of its own carrying the target it links to. */
 function link (run: Run, found: { start: number; end: number; link: number }[]): Run[] {
   const out: Run[] = []
@@ -95,7 +124,7 @@ async function planOf ($: Engine, text: string): Promise<Plan | null> {
   if (known && Date.now() - known.at < PLAN_MS) return known.plan
 
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
-  type Pending = { run: Run; found: { start: number; end: number; path: string }[] }
+  type Pending = { run: Run; found: { start: number; end: number; path: string; line?: number }[] }
   const pending: Pending[] = []
   const runsOf = (source: string) =>
     inline(source).map(run => {
@@ -104,7 +133,8 @@ async function planOf ($: Engine, text: string): Promise<Plan | null> {
         const named = run.style.code ? [pathOfSpan(run.text)].flatMap(target => (target ? [{ start: 0, end: run.text.length, target }] : [])) : pathsIn(run.text)
         for (const { start, end, target } of named) {
           const path = resolve(target, cwd, home)
-          if (path) found.push({ start, end, path })
+          const line = lineOf(run.text.slice(start, end))
+          if (path) found.push({ start, end, path, ...(line !== undefined && { line }) })
         }
       }
       const entry = { run, found }
@@ -127,7 +157,7 @@ async function planOf ($: Engine, text: string): Promise<Plan | null> {
   const targets: Target[] = []
   const finish = (runs: Pending[]) =>
     runs.flatMap(({ run, found: named }) => {
-      const kept = named.filter(entry => found.has(entry.path)).map(entry => ({ ...entry, link: targets.push({ path: entry.path, stat: found.get(entry.path)! }) - 1 }))
+      const kept = named.filter(entry => found.has(entry.path)).map(entry => ({ ...entry, link: targets.push({ path: entry.path, stat: found.get(entry.path)!, ...(entry.line !== undefined && { line: entry.line }) }) - 1 }))
       return link(run, kept)
     })
   const linked = (runs: Run[]) => runs.some(run => run.link !== undefined)
@@ -149,6 +179,13 @@ async function planOf ($: Engine, text: string): Promise<Plan | null> {
     if (part.kind === 'markdown' && last?.kind === 'markdown') last.text += '\n'.repeat(part.gap + 1) + part.text
     else parts.push(part)
   })
+  // With no window, a card shows a file of code or text: its lines are read now.
+  if (!windowing) {
+    await Promise.all(targets.map(async target => {
+      const code = await excerptAt($, target.path, target.stat, target.line, CARD_LINES)
+      if (code) target.code = code
+    }))
+  }
   const plan = targets.length > 0 ? { parts, targets } : null
   if (plans.size >= PLANS) plans.delete(plans.keys().next().value!)
   plans.set(key, { plan, at: Date.now() })
@@ -176,7 +213,7 @@ function cardOf (target: Target) {
  * `Client` that takes the pointer.
  */
 function drawRows (ui: Ui, rows: Row[], width: number, targets: Target[], parts: Map<number, number>) {
-  const { Box, Client, Link, Text } = ui
+  const { Box, Client, Code, Link, Text } = ui
   return rows.map(row => {
     let column = 0
     return (
@@ -193,18 +230,22 @@ function drawRows (ui: Ui, rows: Row[], width: number, targets: Target[], parts:
           const part = parts.get(run.link) ?? 0
           parts.set(run.link, part + 1)
           const target = targets[run.link]!
-          const props = { label: run.text, path: target.path, ...(bold && { bold }), ...(italic && { italic }), ...(strike && { strike }) }
+          const props = { label: run.text, path: target.path, ...(target.line !== undefined && { line: target.line }), ...(bold && { bold }), ...(italic && { italic }), ...(strike && { strike }) }
           const client = <Client key={`path:${run.link}:${part}`} module="./link.tsx" props={props} />
           if (windowing) return client
           // No window: a card over the path, which the terminal reveals while the pointer is on it,
-          // moved left as far as it needs to end inside the reply.
+          // moved left as far as it needs to end inside the reply. A file of code or text shows its
+          // lines under the card's line, coloured by the engine, on the background of the theme.
           const card = cardOf(target)
-          const left = Math.max(-at, Math.min(0, width - at - widthOf(card)))
+          const excerpt = target.code
+          const cardWidth = Math.min(excerpt ? Math.max(widthOf(card), CARD_COLUMNS) : widthOf(card), width)
+          const left = Math.max(-at, Math.min(0, width - at - cardWidth))
           return (
             <Box key={`card:${run.link}:${part}`}>
               {client}
-              <Box position="absolute" top={-1} left={left} width={Math.min(widthOf(card), width)} display="none" hover={{ display: 'flex' }}>
+              <Box position="absolute" top={-1 - (excerpt?.lines.length ?? 0)} left={left} width={cardWidth} flexDirection="column" display="none" hover={{ display: 'flex' }} {...(excerpt && { backgroundColor: 'inverseText' })}>
                 <Text inverse wrap="truncate-end">{card}</Text>
+                {excerpt && <Code source={excerpt.source} path={target.path} startLine={excerpt.first} wrap="truncate-end" />}
               </Box>
             </Box>
           )
@@ -296,16 +337,23 @@ async function reveal ($: Engine, path: string, isOpening: boolean) {
 }
 
 /**
- * Shows `path` in a window by the pointer till `closeWindow`. The program says `.` ten times a
- * second, so the loop wakes to see it was closed, and leaving the loop ends the program. One that
- * ends without having shown a window, on a path that is there, says the system shows none: from
- * then on the terminal shows the cards.
+ * Shows `path` in a window by the pointer till `closeWindow`; a file of code or text, its lines
+ * around `line`. The program says `.` ten times a second, so the loop wakes to see it was closed,
+ * and leaving the loop ends the program. One that ends without having shown a window, on a path
+ * that is there, says the system shows none: from then on the terminal shows the cards.
  */
-async function openWindow ($: Engine, path: string) {
+async function openWindow ($: Engine, path: string, line: number | undefined) {
   closeWindow()
-  const opening = { path, isOpen: true }
+  const opening = { path, line, isOpen: true }
   window = opening
-  const env = { QUICK_PEEK_FILE: path, QUICK_PEEK_SIZE: String(WINDOW_SIZE), QUICK_PEEK_LIFE: String(WINDOW_LIFE), QUICK_PEEK_HINT: 'click: show in Finder · ⌥ click: open' }
+  const env: Record<string, string> = { QUICK_PEEK_FILE: path, QUICK_PEEK_SIZE: String(WINDOW_SIZE), QUICK_PEEK_LIFE: String(WINDOW_LIFE), QUICK_PEEK_HINT: 'click: show in Finder · ⌥ click: open' }
+  const stat = await statOf($, path)
+  const code = stat && (await excerptAt($, path, stat, line, WINDOW_LINES))
+  if (!opening.isOpen) return
+  if (code) {
+    const { source, ...shown } = code
+    env.QUICK_PEEK_CODE = JSON.stringify(shown)
+  }
   let isShown = false
   let said = ''
   try {
@@ -329,12 +377,15 @@ function closeWindow () {
   window = undefined
 }
 
-/** The pointer came onto a part of `path` (`target`, the part's address): its preview opens, unless it is open. */
-function over ($: Engine, path: string, target: string) {
-  const isOpen = hovered?.path === path && window?.path === path && window.isOpen
-  hovered = { path, target }
+/**
+ * The pointer came onto a part of `path` naming `line` (`target`, the part's address): its preview
+ * opens, unless it is open.
+ */
+function over ($: Engine, path: string, line: number | undefined, target: string) {
+  const isOpen = hovered?.path === path && hovered.line === line && window?.path === path && window.line === line && window.isOpen
+  hovered = { path, line, target }
   if (isOpen || !windowing) return
-  void openWindow($, path)
+  void openWindow($, path, line)
 }
 
 /** The pointer left a part: the preview closes, unless the pointer is already on another part of it. */
@@ -352,6 +403,7 @@ export const register: Register = (on, options) => {
     windowing = options.window !== false && e.isInteractive && system === 'macos' && sshConnection === undefined && sshTty === undefined
     plans.clear()
     stats.clear()
+    excerpts.clear()
     return result
   })
 
@@ -381,7 +433,7 @@ export const register: Register = (on, options) => {
   on('ui.message', async ($, e, next) => {
     const result = await next(e)
     if (!e.element.startsWith('path:')) return result
-    const data = e.data as { path?: unknown; isOver?: unknown; isClicked?: unknown; isAlt?: unknown } | null
+    const data = e.data as { path?: unknown; line?: unknown; isOver?: unknown; isClicked?: unknown; isAlt?: unknown } | null
     if (typeof data?.path !== 'string') return result
     const target = `${e.requestId}/${e.element}`
     if (data.isClicked === true) {
@@ -390,7 +442,7 @@ export const register: Register = (on, options) => {
       void reveal($, data.path, data.isAlt === true)
       return result
     }
-    if (data.isOver === true) over($, data.path, target)
+    if (data.isOver === true) over($, data.path, typeof data.line === 'number' ? data.line : undefined, target)
     else off(target)
     return result
   })
