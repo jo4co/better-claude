@@ -121,7 +121,18 @@
 
     /* Install */
     .install { margin: 48px 0 0; }
-    .picks { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0 0 22px; padding: 0; list-style: none; }
+    .picks-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0 0 14px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .picks-head strong { color: var(--soft); font-weight: 400; }
+    .picks-head .count { color: var(--clawd); }
+    .picks-head button {
+      margin-left: auto; padding: 0; border: 0; background: none;
+      font: inherit; color: var(--muted); cursor: pointer;
+      transition: color .2s;
+    }
+    .picks-head button:hover { color: var(--fg); }
+    /* Four columns, so the picks fill rows evenly (4 + 3) instead of leaving one alone */
+    .picks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 22px; margin: 0 0 24px; padding: 0; list-style: none; }
+    @media (max-width: 640px) { .picks { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .pick {
       display: inline-flex; align-items: center; gap: 9px;
       padding: 0; border: 0; background: none;
@@ -627,7 +638,8 @@
       <p class="lede">Free, open-source plugins and mods for Claude Code, by <a href="https://github.com/midudev">@midudev</a>.</p>
 
       <section class="install" aria-label="Install">
-        <ul class="picks">
+        <p class="picks-head"><strong id="picks-label">Pick what to install</strong><span class="count" id="picks-count"></span><button type="button" id="picks-all"></button></p>
+        <ul class="picks" role="group" aria-labelledby="picks-label">
           <li><button type="button" class="pick" data-plugin="quick-peek" aria-pressed="true">Quick Peek</button></li>
           <li><button type="button" class="pick" data-plugin="image-preview" aria-pressed="true">Image Preview</button></li>
           <li><button type="button" class="pick" data-plugin="sub-meter" aria-pressed="true">Sub Meter</button></li>
@@ -1063,11 +1075,23 @@
         return picked.length ? installPrompt(picked) : ''
       }
 
+      const count = $('#picks-count')
+      const all = $('#picks-all')
+
       function render () {
         const text = promptText()
         out.textContent = text || 'Pick at least one plugin.'
         copyPrompt.disabled = !text
+        const picked = picks.filter(p => p.getAttribute('aria-pressed') === 'true').length
+        count.textContent = `${picked} of ${picks.length}`
+        all.textContent = picked === picks.length ? 'select none' : 'select all'
       }
+
+      all.addEventListener('click', () => {
+        const pressed = picks.some(p => p.getAttribute('aria-pressed') !== 'true') ? 'true' : 'false'
+        picks.forEach(p => p.setAttribute('aria-pressed', pressed))
+        render()
+      })
 
       async function copy (text) {
         try {
