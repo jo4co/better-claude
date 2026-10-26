@@ -61,7 +61,7 @@
       "name": "quick-peek",
       "source": "./plugins/quick-peek",
       "description": "The paths in Claude's replies become links: hover one to preview it by the pointer, click it to show it in Finder (or your system's file manager).",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "category": "productivity"
     },
     {
