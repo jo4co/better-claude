@@ -3,12 +3,14 @@
 A Claude Code mod: the paths in Claude's replies become links. Hover one and a preview opens by the pointer, a file of code with its lines coloured; click it and Finder opens with the file selected.
 
 ```text
-⏺ He hecho dos versiones del principio. Elige la que más te guste:
+⏺ I made two versions of the opening. Pick the one you like:
 
-  - A, desde dentro de la lámpara: empieza pegado al cristal y la cámara sale disparada.
-    /Users/midudev/Dev/video/revisar/borrador.mp4        ← hover: preview · click: Finder
-  - B, el viaje: la cámara vuela pegada a la pared.
-    /Users/midudev/Dev/video/revisar/borrador-01-viaje.mp4
+  - A, from inside the lamp: it starts against the glass and the camera shoots out.
+    /Users/midudev/Dev/video/review/draft.mp4             ← hover: its frame · click: Finder
+  - B, the journey: the camera flies along the wall.
+    /Users/midudev/Dev/video/review/draft-01-journey.mp4
+
+  The cut between them is set in src/timeline.ts:42       ← hover: its lines, 42 lit
 ```
 
 - **Which paths**: absolute (`/Users/…`), from home (`~/…`), relative to the session's folder (`./x`, `src/app.ts`, `README.md`), with or without backticks, and with a `:line` or `:line:column` after them. Only the paths that lead to a file or a folder become links; the rest stay as Claude wrote them. Inside backticks a path may hold spaces.
