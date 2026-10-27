@@ -18,13 +18,14 @@ const SCREEN = { columns: 60, rows: 40, isFullscreen: true }
  * Everything beneath the mod: the session, the files that are there, the programs it runs, the
  * window's program, and what the engine draws.
  */
-function world (on: On, { system = 'Darwin', env = {} }: { system?: string; env?: Record<string, string> } = {}) {
+function world (on: On, { system = 'Darwin', env = {}, cwd = '/project/app' }: { system?: string; env?: Record<string, string>; cwd?: string } = {}) {
   const clock = mock.clock(on, { now: 0 })
   mock.env(on, { HOME: '/Users/ana', ...env })
   const there: Record<string, 'file' | 'dir'> = { [VIDEO]: 'file', [FOLDER]: 'dir', [README]: 'file', [SOURCE]: 'file' }
   const runs: string[][] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.cwd', () => ({ value: '/project/app' }))
+  on('session.cwd', () => ({ value: cwd }))
+  on('session.root', () => ({ value: '/project/app' }))
   on('process.run', ($, e) => {
     runs.push([...e.argv])
     const stdout = e.argv[0] === 'uname' ? `${system}\n` : e.argv[0] === 'wslpath' ? 'C:\\Users\\ana\\videos\\borrador.mp4\n' : ''
@@ -128,6 +129,15 @@ test('a path that leads somewhere is a link; the blocks without one are the engi
   expect(await ui.find({ type: 'Markdown', text: /nada\.mp4 no está/ })).toBeDefined()
   expect(await ui.find({ key: 'path:1:0' })).toMatchObject({ props: { props: { label: 'README.md', path: README } } })
   expect(await ui.find({ type: 'Text', text: '-' })).toBeDefined()
+})
+
+test('after a `cd` into a folder of the project, a relative path leads from there or else from the project', async ($, on) => {
+  world(on, { cwd: '/project/app/src' })
+  await startSession($)
+  const ui = await reply($, 'Mira `src/app.ts`, app.ts y README.md')
+  expect(await ui.find({ key: 'path:0:0' })).toMatchObject({ props: { props: { label: 'src/app.ts', path: SOURCE } } })
+  expect(await ui.find({ key: 'path:1:0' })).toMatchObject({ props: { props: { label: 'app.ts', path: SOURCE } } })
+  expect(await ui.find({ key: 'path:2:0' })).toMatchObject({ props: { props: { label: 'README.md', path: README } } })
 })
 
 test('a reply naming no path that is there is the engine\'s, and so is one off fullscreen', async ($, on) => {

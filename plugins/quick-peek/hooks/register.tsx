@@ -118,13 +118,16 @@ function link (run: Run, found: { start: number; end: number; link: number }[]):
  * own Markdown. Null when no path in it leads anywhere: the engine draws the reply.
  */
 async function planOf ($: Engine, text: string): Promise<Plan | null> {
+  // A relative path leads from the folder the shell is in, or else from the project's: Claude
+  // names paths from the project even after a `cd` took the shell into one of its folders.
   const cwd = await $.session.cwd()
-  const key = `${cwd}\n${text}`
+  const root = await $.session.root().catch(() => cwd)
+  const key = `${cwd}\n${root}\n${text}`
   const known = plans.get(key)
   if (known && Date.now() - known.at < PLAN_MS) return known.plan
 
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
-  type Pending = { run: Run; found: { start: number; end: number; path: string; line?: number }[] }
+  type Pending = { run: Run; found: { start: number; end: number; paths: string[]; line?: number }[] }
   const pending: Pending[] = []
   const runsOf = (source: string) =>
     inline(source).map(run => {
@@ -132,9 +135,9 @@ async function planOf ($: Engine, text: string): Promise<Plan | null> {
       if (run.style.href === undefined) {
         const named = run.style.code ? [pathOfSpan(run.text)].flatMap(target => (target ? [{ start: 0, end: run.text.length, target }] : [])) : pathsIn(run.text)
         for (const { start, end, target } of named) {
-          const path = resolve(target, cwd, home)
+          const paths = [...new Set([cwd, root].flatMap(base => resolve(target, base, home) ?? []))]
           const line = lineOf(run.text.slice(start, end))
-          if (path) found.push({ start, end, path, ...(line !== undefined && { line }) })
+          if (paths.length > 0) found.push({ start, end, paths, ...(line !== undefined && { line }) })
         }
       }
       const entry = { run, found }
@@ -152,12 +155,15 @@ async function planOf ($: Engine, text: string): Promise<Plan | null> {
       : block.kind === 'list' ? { kind: 'list', items: draftItems(items(block.text), 0), gap: block.gap }
         : { kind: 'markdown', text: block.text, gap: block.gap })
 
-  const paths = [...new Set(pending.flatMap(entry => entry.found.map(found => found.path)))]
+  const paths = [...new Set(pending.flatMap(entry => entry.found.flatMap(found => found.paths)))]
   const found = new Map((await Promise.all(paths.map(async path => [path, await statOf($, path)] as const))).filter(([, stat]) => stat !== null) as [string, FsStat][])
   const targets: Target[] = []
   const finish = (runs: Pending[]) =>
     runs.flatMap(({ run, found: named }) => {
-      const kept = named.filter(entry => found.has(entry.path)).map(entry => ({ ...entry, link: targets.push({ path: entry.path, stat: found.get(entry.path)!, ...(entry.line !== undefined && { line: entry.line }) }) - 1 }))
+      const kept = named.flatMap(({ paths: candidates, ...entry }) => {
+        const path = candidates.find(candidate => found.has(candidate))
+        return path === undefined ? [] : [{ ...entry, link: targets.push({ path, stat: found.get(path)!, ...(entry.line !== undefined && { line: entry.line }) }) - 1 }]
+      })
       return link(run, kept)
     })
   const linked = (runs: Run[]) => runs.some(run => run.link !== undefined)
