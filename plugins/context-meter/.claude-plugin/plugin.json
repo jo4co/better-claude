@@ -1,0 +1,38 @@
+{
+  "name": "context-meter",
+  "version": "0.1.0",
+  "description": "The session's context window fill, right above the prompt: gray while there is room, yellow when it is time to /compact, red when a new session is better.",
+  "author": {
+    "name": "Miguel Ángel Durán (midudev)",
+    "url": "https://github.com/midudev"
+  },
+  "homepage": "https://github.com/midudev/better-claude",
+  "repository": "https://github.com/midudev/better-claude",
+  "license": "MIT",
+  "keywords": [
+    "context",
+    "compact",
+    "tokens",
+    "status",
+    "mod"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "warnAt": {
+      "type": "number",
+      "title": "Yellow from",
+      "description": "Context percentage from which the meter turns yellow (time to /compact).",
+      "default": 50,
+      "min": 1,
+      "max": 100
+    },
+    "dangerAt": {
+      "type": "number",
+      "title": "Red from",
+      "description": "Context percentage from which the meter turns red (better start a new session).",
+      "default": 75,
+      "min": 1,
+      "max": 100
+    }
+  }
+}

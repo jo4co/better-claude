@@ -144,7 +144,7 @@ npm run test:node                # unit tests for src/ (node --test, no dependen
 npm run test:mod                 # the mod against the engine: claude plugin test .
 npm run validate                 # claude plugin validate .
 npm run typecheck                # tsc against the types Claude Code lays in .claude-plugin/types
-claude --plugin-dir .            # try it from source; edits hot-reload
+claude --plugin-dir ./plugins/after   # try it from source; edits hot-reload
 npm run eval                     # the real model against the plain-language cases (costs a few cents)
 ```
 

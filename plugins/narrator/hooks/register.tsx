@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderNode, RenderViewport, Timer } from 'claude-code'
 
 import { LINUX, MACOS, MACOS_VOICES, QUEUE, WINDOWS, WINDOWS_VOICES, dispatcherRate, espeakWords, powershell } from './speaker'
-import { cut, guessLanguage, parseNarration, plain } from './text'
+import { cut, finalQuestion, guessLanguage, parseNarration, plain, withQuestion } from './text'
 
 type Platform = 'macos' | 'windows' | 'linux' | 'other'
 /** A program that speaks, and what it is told through its environment. */
@@ -49,11 +49,14 @@ const PREVIEW = 'Hello! This is a voice preview for Narrator.'
 // The tool inputs that say best what a call did, in order of preference.
 const DETAILS = ['description', 'file_path', 'notebook_path', 'path', 'pattern', 'url', 'query', 'skill', 'command', 'prompt']
 const LANGUAGE_CODE = /^[a-z]{2,3}(?:[-_][a-z0-9]{2,8})*$/i
+const DISPLAY_NAMES = new Intl.DisplayNames(['en'], { type: 'language', fallback: 'none' })
+// What /recap prints when it wrote no recap: nothing to say out loud.
+const NO_RECAP = /^(Nothing to recap yet\b|Recap cancelled\.|Couldn't generate a recap\.|\/recap only runs\b|API Error:)/
 
 /** The English name of a language code, or undefined where the runtime's language data does not know it. */
 function languageName (code: string) {
   try {
-    return new Intl.DisplayNames(['en'], { type: 'language', fallback: 'none' }).of(code)
+    return DISPLAY_NAMES.of(code)
   } catch {
     return undefined
   }
@@ -65,16 +68,18 @@ function spoken (language: string) {
   return `Always speak ${languageName(language) ?? language} (${language}), whatever language the request or Claude's final message is in.`
 }
 
-const NARRATOR = (language: string) => `You are the voice of Claude Code, a coding assistant. After each of its turns you tell the user, out loud, what Claude just did, speaking as Claude in the first person.
+const NARRATOR = (language: string) => `You are the voice of Claude Code, a coding assistant. After each of its turns you speak to the user, out loud, as Claude: in the first person, to them. You are Claude talking to the person, not a narrator talking about them.
 
 You get the user's request, the actions Claude took and Claude's final message. Say what a colleague would say in passing: what was done and how it turned out, plus anything the user has to do or decide now. Leave out how it was done. If Claude only answered a question, give the gist of the answer.
+
+Talk to the user, never about them: address them in the second person ("you"), in the language you speak, never as "the user". And you are Claude: say "I", never "Claude" or "the assistant". When you are given Claude's closing question, it is read right after your words, as Claude wrote it: do not ask it, report it or mention it. Otherwise, if Claude's final message asks the user something, end with that question, asked to them directly as a question ("Do I run the quick test?"), not reported ("I ask whether to run it") and with no label before it.
 
 ${spoken(language)}
 
 Rules:
 - A speech synthesizer reads it aloud: plain sentences only. No markdown, lists, emojis or code, and no file paths, URLs, hashes or version strings read out character by character: name files and commands the way a person says them ("the register file", "the tests").
-- Short: one sentence, two only for a large change; never more than 30 words.
-- No preamble ("Sure", "In summary"), no questions back, nothing Claude did not say or do.
+- Short: one sentence, two only for a large change; never more than 30 words, plus Claude's question when it asked one.
+- No preamble ("Sure", "In summary"), no question of your own, nothing Claude did not say or do.
 
 Reply in exactly this form: the first line holds only the ISO 639-1 code of the language you speak (es, en, pt, fr...), and the narration starts on the second line.`
 
@@ -85,7 +90,7 @@ const sweepStep = atom({ plugin: 'narrator', key: 'sweepStep' } as const, 0)
 /** An answer this short is read out as it is: no model call to write a narration of it. */
 const SHORT_ANSWER = 200
 
-let settings = { voice: '', model: 'haiku', speed: SPEED, shortAnswer: SHORT_ANSWER, language: '', footerSwitch: true }
+let settings = { voice: '', model: 'haiku', speed: SPEED, shortAnswer: SHORT_ANSWER, language: '', command: '', footerSwitch: true }
 // The main loop's turn so far: the prompt that started it and each tool call it made.
 let request = ''
 let actions: string[] = []
@@ -96,6 +101,7 @@ let linuxSpeech: Promise<LinuxSpeech> | undefined
 let hasWarned = false
 // The hint as last drawn on the terminal, in columns.
 let hintWidth = 0
+let lastHint = ''
 // The language the last narration was said in: a short answer whose words do not tell is read in it.
 let spokenLanguage = ''
 // The last narration said, for `/narrator again`, and the main loop's last answer with its request, for `/narrator read`.
@@ -103,6 +109,9 @@ let lastSaid: { text: string; language: string } | undefined
 let lastAnswer: { answer: string; request: string } | undefined
 // The sweep across the switch, running while it speaks.
 let sweep: Timer | undefined
+let isNarratorEnabled = false
+let lastCellsText = ''
+let lastCells: string[] = []
 
 /**
  * A language setting as its ISO 639 code (`es-MX` is `es`), checked against the language data the
@@ -123,13 +132,14 @@ function describe (e: object) {
   return detail === undefined ? String(input.tool) : `${String(input.tool)}: ${cut(String(detail).replace(/\s+/g, ' '), 200)}`
 }
 
-/** What the narrator is told about the turn. */
-function brief (answer: string) {
+/** What the narrator is told about the turn, and Claude's closing question, which is read after it as it is. */
+function brief (answer: string, question: string) {
   const did = actions.length > 0 ? actions.map(action => `- ${action}`).join('\n') : '(no tools: Claude only answered)'
   return [
     `The user's request:\n<request>\n${cut(request, 2000) || '(none: Claude went on by itself)'}\n</request>`,
     `What Claude did, in order:\n${did}`,
-    `Claude's final message to the user:\n<message>\n${cut(answer, 6000)}\n</message>`
+    `Claude's final message to the user:\n<message>\n${cut(answer, 6000)}\n</message>`,
+    ...(question ? [`Claude's closing question, read right after your words as it is (do not ask, report or mention it):\n<question>\n${question}\n</question>`] : [])
   ].join('\n\n')
 }
 
@@ -191,6 +201,11 @@ const inLine = (command: Command): Command => ({ ...command, argv: ['sh', '-c', 
 async function speakersFor ($: EngineInterface, text: string, language: string, voice: string, ticket: string): Promise<Command[]> {
   const env = { NARRATOR_TEXT: text, NARRATOR_LANG: language, NARRATOR_VOICE: voice, NARRATOR_SPEED: String(settings.speed), NARRATOR_TICKET: ticket }
   const system = await platformOf($)
+  // A speak command of the person's own, run by the shell with the narration as its last argument.
+  if (settings.command && system !== 'windows') {
+    const argv = ['sh', '-c', LINUX, 'narrator', 'sh', '-c', `exec ${settings.command} "$1"`, 'narrator-command', text]
+    return [inLine({ argv, env: { ...env, NARRATOR_SPEAKER: settings.command }, program: settings.command })]
+  }
   if (system === 'macos') return [inLine({ argv: ['osascript', '-l', 'JavaScript', '-e', MACOS], env, program: 'osascript' })]
   if (system === 'windows') return [{ argv: powershell(WINDOWS), env, program: 'powershell' }]
   if (system !== 'linux') return []
@@ -416,19 +431,37 @@ async function narrate ($: EngineInterface, answer: string) {
       await speak($, narration, direct, directLanguage)
       return
     }
+    // The language to speak: the setting, else the request's when its words tell it. The model is told
+    // it in so many words: left to tell it from a request in one language and tool calls in another, it
+    // sometimes narrates in the wrong one.
+    const asked = settings.language || guessLanguage(request)
+    // Claude's closing question is said as Claude wrote it, after the narration: the model, asked to
+    // pass it on, sometimes reports it ("I ask whether to do it") or drops it. Only when the answer is in
+    // the language to speak: a question in another one is left to the model to ask in it.
+    const answerLanguage = guessLanguage(answer)
+    const question = asked !== '' && answerLanguage !== '' && answerLanguage !== asked ? '' : finalQuestion(answer)
     const reply = await $.model.complete(
       // A short summary: no deep thinking, so it is said right after the turn.
-      { model: settings.model, system: NARRATOR(settings.language), prompt: brief(answer), maxTokens: 150, effort: 'low', timeoutMs: 30_000 },
+      { model: settings.model, system: NARRATOR(asked), prompt: brief(answer, question), maxTokens: 150, effort: 'low', timeoutMs: 30_000 },
       { signal: narration.abort.signal }
     ).catch(() => undefined)
     if (!narration.isActive) return
     const told = reply?.isAnswered ? parseNarration(reply.text) : undefined
-    // No narration written: the answer itself, as far as it reads aloud.
-    const { text, language } = told?.text ? told : { text: cut(direct, 250), language: directLanguage }
-    if (language) spokenLanguage = language
-    if (!text) return
-    lastSaid = { text, language }
-    await speak($, narration, text, language)
+    // A narration in another language than the request's is not said, whatever code the model wrote:
+    // its words tell. The setting is left to the model, as the answer may be in neither.
+    const toldLanguage = told ? guessLanguage(told.text) || told.language : ''
+    const isOtherLanguage = !settings.language && asked !== '' && toldLanguage !== '' && toldLanguage !== asked
+    if (isOtherLanguage) $.ui.log(`narrator: the model narrated in ${toldLanguage}, not ${asked}: reading the answer instead`, { to: 'debug' })
+    // No narration written, or not in the request's language: the answer itself, as far as it reads aloud.
+    const { text, language } = told?.text && !isOtherLanguage ? told : { text: cut(direct, 250), language: directLanguage }
+    const said = withQuestion(text, question)
+    if (!said) return
+    // The voice follows the words, not the code the model wrote: a narration in English is never read
+    // by a Spanish voice.
+    const saidLanguage = guessLanguage(said) || language
+    if (saidLanguage) spokenLanguage = saidLanguage
+    lastSaid = { text: said, language: saidLanguage }
+    await speak($, narration, said, saidLanguage)
   } catch (error) {
     $.ui.log(`narrator: ${message(error)}`, { to: 'debug' })
   } finally {
@@ -463,7 +496,7 @@ function readAnswer ($: EngineInterface) {
   const { answer, request: asked } = lastAnswer
   const text = plain(answer)
   if (!text) return 'Narrator: the last answer has nothing to read aloud.'
-  void retell($, text, guessLanguage(answer) || guessLanguage(`${asked}\n${answer}`) || spokenLanguage)
+  void retell($, text, guessLanguage(answer) || guessLanguage(`${asked}\n${answer}`) || spokenLanguage || settings.language)
   return 'Narrator: reading the last answer.'
 }
 
@@ -477,6 +510,7 @@ function press ($: EngineInterface) {
 async function setEnabled ($: EngineInterface, value?: boolean) {
   let isEnabled = false
   await update($, enabled, now => (isEnabled = value ?? !now))
+  isNarratorEnabled = isEnabled
   if (!isEnabled) silence()
   await $.store.set('enabled', isEnabled)
   return isEnabled
@@ -495,11 +529,14 @@ const widthOf = (text: string) => [...text.replace(/[\uFE0E\uFE0F]/g, '')].lengt
 
 /** A text's cells: one per character, a variation selector kept with the one before it. */
 function cellsOf (text: string) {
+  if (text === lastCellsText) return lastCells
   const cells: string[] = []
   for (const char of text) {
     if (/[\uFE0E\uFE0F]/.test(char) && cells.length > 0) cells[cells.length - 1] += char
     else cells.push(char)
   }
+  lastCellsText = text
+  lastCells = cells
   return cells
 }
 
@@ -536,6 +573,8 @@ export const register: Register = (on, options) => {
   // Whether someone is at the session. Until session.start says otherwise (a mod loaded in the middle
   // of a session does not see it), someone is.
   let isInteractive = true
+  isNarratorEnabled = false
+  lastHint = ''
   const speed = Number(options.speed)
   const shortAnswer = Number(options.shortAnswer ?? SHORT_ANSWER)
   settings = {
@@ -544,6 +583,7 @@ export const register: Register = (on, options) => {
     speed: speed > 0 ? speed : SPEED,
     shortAnswer: shortAnswer >= 0 ? shortAnswer : SHORT_ANSWER,
     language: languageOf(options.language),
+    command: String(options.command ?? '').trim(),
     footerSwitch: options.footerSwitch !== false
   }
 
@@ -559,6 +599,7 @@ export const register: Register = (on, options) => {
       immediate: true
     })
     const isEnabled = (await $.store.get('enabled')) === true
+    isNarratorEnabled = isEnabled
     await update($, enabled, () => isEnabled)
     return next(e)
   })
@@ -609,7 +650,7 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
-    if (e.agentId === undefined && actions.length < MAX_ACTIONS && (await read($, enabled))) {
+    if (isInteractive && isNarratorEnabled && e.agentId === undefined && actions.length < MAX_ACTIONS) {
       actions.push(describe(e) + (result.deny !== undefined ? ' (denied)' : result.isError ? ' (failed)' : ''))
     }
     return result
@@ -619,9 +660,19 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     // Kept on or off, so `/narrator read` can read it whenever it is asked.
     if (e.agentId === undefined && e.reason === 'answer' && e.answer.trim()) lastAnswer = { answer: e.answer, request }
-    if (isInteractive && e.agentId === undefined && e.reason === 'answer' && e.answer.trim() && (await read($, enabled))) void narrate($, e.answer)
+    if (isInteractive && isNarratorEnabled && e.agentId === undefined && e.reason === 'answer' && e.answer.trim()) void narrate($, e.answer)
     return result
   })
+
+  on('command.run', { command: 'recap' }, async ($, e, next) => {
+    silence()
+    const result = await next(e)
+    if (isInteractive && isNarratorEnabled && result.text?.trim() && !NO_RECAP.test(result.text)) {
+      actions = []
+      void narrate($, result.text)
+    }
+    return result
+  }).catch(($, e, next) => next(e))
 
   // The switch, last in the footer's right end: a click turns the narrator on or off, and while it
   // speaks, skips to the next narration in the line or stops it.
@@ -631,8 +682,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     // Switched off where another panel (User Tools) holds the narrator's switch.
     if (!settings.footerSwitch) return next(e)
-    const isEnabled = await read($, enabled)
-    const speaking = await read($, speech)
+    const [isEnabled, speaking] = await Promise.all([read($, enabled), read($, speech)])
     const step = speaking ? await read($, sweepStep) : 0
     // Beneath: the engine's mode labels, or another plugin's drawing there.
     const beneath = await next(e)
@@ -664,9 +714,13 @@ export const register: Register = (on, options) => {
 
   // The hint line beside the mode label: its width tells the switch how much room is left.
   on('ui.render', { component: 'PromptHint' }, ($, e, next) => {
-    if (e.surface === 'terminal' && widthOf(e.props.hint) !== hintWidth) {
-      hintWidth = widthOf(e.props.hint)
-      $.ui.invalidate('ui.render')
+    if (e.surface === 'terminal' && e.props.hint !== lastHint) {
+      lastHint = e.props.hint
+      const width = widthOf(e.props.hint)
+      if (width !== hintWidth) {
+        hintWidth = width
+        $.ui.invalidate('ui.render')
+      }
     }
     return next(e)
   })

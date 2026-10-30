@@ -102,12 +102,12 @@ const HALF = SIDE / 2
 const POINTS = SIDE * SIDE
 
 /** A block element, and which of a cell's points its foreground covers. */
-type Shape = { glyph: number; inside: Uint8Array }
+type Shape = { glyph: number; inside: Uint8Array; count: number }
 
-const shape = (glyph: number, covers: (x: number, y: number) => boolean): Shape => ({
-  glyph,
-  inside: Uint8Array.from({ length: POINTS }, (_, i) => (covers(i % SIDE, Math.floor(i / SIDE)) ? 1 : 0))
-})
+const shape = (glyph: number, covers: (x: number, y: number) => boolean): Shape => {
+  const inside = Uint8Array.from({ length: POINTS }, (_, i) => (covers(i % SIDE, Math.floor(i / SIDE)) ? 1 : 0))
+  return { glyph, inside, count: inside.reduce((sum, bit) => sum + bit, 0) }
+}
 
 // The ways a cell can be split in two colors: the halves, the eighths from the bottom and from the
 // left (each also the rest from the top or right, the colors swapped), the quarters and the
@@ -128,10 +128,18 @@ const SHAPES: Shape[] = [
 /** One cell's points: gamma-encoded, to choose a shape by; linear, to mix its colors in; and which show. */
 type Points = { encoded: Float64Array; linear: Float64Array; shows: Uint8Array; shown: number }
 
+const SCRATCH_POINTS: Points = {
+  encoded: new Float64Array(POINTS * 3),
+  linear: new Float64Array(POINTS * 3),
+  shows: new Uint8Array(POINTS),
+  shown: 0
+}
+
 /** Averages, in linear light, the pixels under each of the points of the cell at `column`, `row`. */
 function pointsOf ({ width, height, data }: Pixels, columns: number, rows: number, column: number, row: number, points: Points) {
   const across = columns * SIDE
   const down = rows * SIDE
+  const { encoded, linear, shows } = points
   points.shown = 0
   for (let py = 0; py < SIDE; py++) {
     const y0 = Math.floor(((row * SIDE + py) * height) / down)
@@ -144,24 +152,31 @@ function pointsOf ({ width, height, data }: Pixels, columns: number, rows: numbe
       let b = 0
       let alpha = 0
       for (let y = y0; y < y1; y++) {
+        let at = (y * width + x0) * 4
         for (let x = x0; x < x1; x++) {
-          const at = (y * width + x) * 4
           const a = data[at + 3]!
           r += LINEAR[data[at]!]! * a
           g += LINEAR[data[at + 1]!]! * a
           b += LINEAR[data[at + 2]!]! * a
           alpha += a
+          at += 4
         }
       }
       const i = py * SIDE + px
-      const shows = alpha / ((y1 - y0) * (x1 - x0)) >= 128
-      points.shows[i] = shows ? 1 : 0
-      if (!shows) continue
+      const isShown = alpha / ((y1 - y0) * (x1 - x0)) >= 128
+      shows[i] = isShown ? 1 : 0
+      if (!isShown) continue
       points.shown++
-      points.linear[i * 3] = r / alpha
-      points.linear[i * 3 + 1] = g / alpha
-      points.linear[i * 3 + 2] = b / alpha
-      for (let c = 0; c < 3; c++) points.encoded[i * 3 + c] = encode(points.linear[i * 3 + c]!)
+      const out = i * 3
+      const linR = r / alpha
+      const linG = g / alpha
+      const linB = b / alpha
+      linear[out] = linR
+      linear[out + 1] = linG
+      linear[out + 2] = linB
+      encoded[out] = encode(linR)
+      encoded[out + 1] = encode(linG)
+      encoded[out + 2] = encode(linB)
     }
   }
 }
@@ -187,19 +202,32 @@ function shapeOf ({ encoded, shows, shown }: Points) {
   }
   // Each split's error is the total of the squares less what its two groups' averages explain: the
   // largest |sum|² / count over the two groups is the least error.
-  const total = [0, 0, 0]
-  for (let i = 0; i < POINTS; i++) for (let c = 0; c < 3; c++) total[c]! += encoded[i * 3 + c]!
-  let bestScore = (total[0]! ** 2 + total[1]! ** 2 + total[2]! ** 2) / POINTS
+  let total0 = 0
+  let total1 = 0
+  let total2 = 0
+  for (let i = 0; i < POINTS * 3; i += 3) {
+    total0 += encoded[i]!
+    total1 += encoded[i + 1]!
+    total2 += encoded[i + 2]!
+  }
+  let bestScore = (total0 ** 2 + total1 ** 2 + total2 ** 2) / POINTS
   for (const candidate of SHAPES) {
-    const sum = [0, 0, 0]
-    let count = 0
+    let sum0 = 0
+    let sum1 = 0
+    let sum2 = 0
+    const { inside, count } = candidate
     for (let i = 0; i < POINTS; i++) {
-      if (candidate.inside[i] === 0) continue
-      for (let c = 0; c < 3; c++) sum[c]! += encoded[i * 3 + c]!
-      count++
+      if (inside[i] === 0) continue
+      const at = i * 3
+      sum0 += encoded[at]!
+      sum1 += encoded[at + 1]!
+      sum2 += encoded[at + 2]!
     }
-    let score = 0
-    for (let c = 0; c < 3; c++) score += sum[c]! ** 2 / count + (total[c]! - sum[c]!) ** 2 / (POINTS - count)
+    const out = POINTS - count
+    const score =
+      sum0 ** 2 / count + (total0 - sum0) ** 2 / out +
+      sum1 ** 2 / count + (total1 - sum1) ** 2 / out +
+      sum2 ** 2 / count + (total2 - sum2) ** 2 / out
     if (score > bestScore + 1e-6) {
       bestScore = score
       best = candidate
@@ -210,14 +238,19 @@ function shapeOf ({ encoded, shows, shown }: Points) {
 
 /** The color of the points that show on one side of a shape (all of them with none), mixed in linear light. */
 function colorOf ({ linear, shows }: Points, shape: Shape | undefined, side: number) {
-  const sum = [0, 0, 0]
+  let sum0 = 0
+  let sum1 = 0
+  let sum2 = 0
   let count = 0
   for (let i = 0; i < POINTS; i++) {
     if (shows[i] === 0 || (shape ? shape.inside[i] : 1) !== side) continue
-    for (let c = 0; c < 3; c++) sum[c]! += linear[i * 3 + c]!
+    const at = i * 3
+    sum0 += linear[at]!
+    sum1 += linear[at + 1]!
+    sum2 += linear[at + 2]!
     count++
   }
-  return count === 0 ? DEFAULT_COLOR : (encode(sum[0]! / count) << 16) | (encode(sum[1]! / count) << 8) | encode(sum[2]! / count)
+  return count === 0 ? DEFAULT_COLOR : (encode(sum0 / count) << 16) | (encode(sum1 / count) << 8) | encode(sum2 / count)
 }
 
 /**
@@ -227,19 +260,23 @@ function colorOf ({ linear, shows }: Points, shape: Shape | undefined, side: num
  */
 export function toCells (pixels: Pixels, columns: number, rows: number): string {
   const words = new Uint32Array(columns * rows * 3)
-  const points: Points = { encoded: new Float64Array(POINTS * 3), linear: new Float64Array(POINTS * 3), shows: new Uint8Array(POINTS), shown: 0 }
+  const points = SCRATCH_POINTS
   for (let row = 0; row < rows; row++) {
     for (let column = 0; column < columns; column++) {
       pointsOf(pixels, columns, rows, column, row, points)
       const at = (row * columns + column) * 3
       if (points.shown === 0) {
-        words.set([SPACE, DEFAULT_COLOR, DEFAULT_COLOR], at)
+        words[at] = SPACE
+        words[at + 1] = DEFAULT_COLOR
+        words[at + 2] = DEFAULT_COLOR
         continue
       }
       const best = shapeOf(points)
       const inside = colorOf(points, best, 1)
       const outside = !best ? inside : points.shown < POINTS ? DEFAULT_COLOR : colorOf(points, best, 0)
-      words.set([best?.glyph ?? UPPER_HALF, inside, outside], at)
+      words[at] = best?.glyph ?? UPPER_HALF
+      words[at + 1] = inside
+      words[at + 2] = outside
     }
   }
   return new Uint8Array(words.buffer).toBase64()

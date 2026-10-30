@@ -285,22 +285,26 @@ $voices | Sort-Object Language, Name -Unique | ForEach-Object { $_.Name + [char]
  * Linux: runs the synthesizer given as its arguments (spd-say, which speaks with whatever voice
  * speech-dispatcher is set up with, or espeak-ng), writing a `.` while it runs. Ended, or once
  * nobody reads, it ends the synthesizer and runs NARRATOR_STOP, which silences speech-dispatcher.
+ * It also runs a speak command of the person's own, on macOS too: NARRATOR_SPEAKER then names it.
  */
 export const LINUX = String.raw`
 "$@" &
 pid=$!
 stop () {
+  pkill -TERM -P "$pid" 2>/dev/null
   kill "$pid" 2>/dev/null
   if [ -n "$NARRATOR_STOP" ]; then $NARRATOR_STOP >/dev/null 2>&1; fi
   exit 0
 }
 trap stop TERM INT HUP PIPE
-echo "voice $1"
+speaker=$NARRATOR_SPEAKER
+[ -n "$speaker" ] || speaker=$1
+echo "voice $speaker"
 while kill -0 "$pid" 2>/dev/null; do
   echo . 2>/dev/null || stop
   sleep 0.1
 done
-wait "$pid" || echo "error: $1 failed"
+wait "$pid" || echo "error: $speaker failed"
 `
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
@@ -314,15 +318,21 @@ export const dispatcherRate = (speed: number) => Math.round(clamp(((speed - 1) *
 /** espeak's words a minute for a speed: 175 at its normal pace, within the 80 to 450 it takes. */
 export const espeakWords = (speed: number) => Math.round(clamp(175 * speed, 80, 450))
 
+const encodedCache = new Map<string, string>()
+
 /** A PowerShell script as `-EncodedCommand` takes it: UTF-16LE, base64. */
 export function encodedCommand (script: string) {
+  const cached = encodedCache.get(script)
+  if (cached !== undefined) return cached
   const bytes = new Uint8Array(script.length * 2)
   for (let i = 0; i < script.length; i++) {
     const code = script.charCodeAt(i)
     bytes[i * 2] = code & 0xff
     bytes[i * 2 + 1] = code >> 8
   }
-  return bytes.toBase64()
+  const encoded = bytes.toBase64()
+  encodedCache.set(script, encoded)
+  return encoded
 }
 
 /** How PowerShell runs one of these scripts: no profile, no prompts, no script policy in the way. */

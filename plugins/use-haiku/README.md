@@ -50,8 +50,8 @@ The Haiku turn and its subagents live in `$.state` ([`types/index.d.ts`](types/i
 ## Development
 
 ```bash
-claude plugin validate .   # from the repository root, or ./use-haiku
-claude plugin test .       # runs hooks/register.test.tsx against the engine
+claude plugin validate ./plugins/use-haiku   # from the repository root
+claude plugin test ./plugins/use-haiku       # runs hooks/register.test.tsx against the engine
 ```
 
 MIT © Miguel Ángel Durán (midudev)

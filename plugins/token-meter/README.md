@@ -27,8 +27,8 @@ The status line (`$.ui.status`) only takes plain text, so the meter draws in the
 ## Development
 
 ```bash
-claude plugin validate ./token-meter   # from the repository root
-claude plugin test ./token-meter       # runs hooks/register.test.tsx against the engine
+claude plugin validate ./plugins/token-meter   # from the repository root
+claude plugin test ./plugins/token-meter       # runs hooks/register.test.tsx against the engine
 ```
 
 MIT © Miguel Ángel Durán (midudev)

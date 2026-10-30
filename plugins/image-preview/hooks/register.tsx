@@ -65,6 +65,7 @@ const sizeOf = (bytes: number) =>
 let graphics: 'none' | 'file' | 'bytes' = 'none'
 let sessionId: string | undefined
 let folder: string | undefined
+let madeFolder: string | undefined
 // Claude Code's temp folder for every session of this user.
 let temp: string | undefined
 type Platform = 'macos' | 'linux' | 'windows' | 'other'
@@ -84,6 +85,7 @@ let window: { id: number; isOpen: boolean } | undefined
 // The pictures read, shrunk, by id; the cells drawn of them, by id and size.
 const thumbs = new Map<number, Pixels>()
 const loading = new Set<number>()
+const failed = new Set<number>()
 const cells = new Map<string, string>()
 // The PNG bytes, base64, sent to a terminal that is not known to read files, by id.
 const views = new Map<number, string>()
@@ -94,12 +96,17 @@ const views = new Map<number, string>()
 type Noted = { component: Row['component']; seen: number; isBatch: boolean; onScreen: OnScreen | null | undefined }
 const rows = new Map<string, Noted>()
 let seenRows = 0
+let cachedOrder: Map<string, number> | undefined
+let cachedOrderSeen = -1
 // The module loads as the session starts or reloads, and the engine draws every row right after.
 let isBatching = true
 let seenAtLastLook = 0
 let moves = 0
 let movesShown = 0
 let screenRows = 40
+let draftIds: number[] = []
+let hasShown = false
+let poll: { cancel: () => void } | undefined
 
 /** The system the session runs on, asked once. */
 function platformOf ($: Engine) {
@@ -139,10 +146,17 @@ async function follow ($: Engine) {
   const id = await $.session.id()
   if (id === sessionId) return
   // The rows drawn so far are this session's, unless another came before it.
-  if (sessionId !== undefined) rows.clear()
+  if (sessionId !== undefined) {
+    rows.clear()
+    cachedOrder = undefined
+    cachedOrderSeen = -1
+    moves++
+  }
   sessionId = id
   folder = undefined
+  madeFolder = undefined
   thumbs.clear()
+  failed.clear()
   cells.clear()
   views.clear()
   await update($, pictures, () => ({}))
@@ -222,8 +236,10 @@ function shrink (tool: Tool, file: string, out: string, format: 'bmp' | 'png', s
 
 /** Makes the mod's cache folder. */
 async function makeFolder ($: Engine, path: string) {
-  if ((await platformOf($)) !== 'windows') return void (await $.process.run(['mkdir', '-p', path]))
-  await $.process.run(powershell('New-Item -ItemType Directory -Force -Path $env:IMAGE_PREVIEW_OUT | Out-Null'), { env: { IMAGE_PREVIEW_OUT: path } })
+  if (madeFolder === path) return
+  if ((await platformOf($)) !== 'windows') await $.process.run(['mkdir', '-p', path])
+  else await $.process.run(powershell('New-Item -ItemType Directory -Force -Path $env:IMAGE_PREVIEW_OUT | Out-Null'), { env: { IMAGE_PREVIEW_OUT: path } })
+  madeFolder = path
 }
 
 async function decode ($: Engine, file: string, out: string): Promise<Pixels> {
@@ -248,7 +264,8 @@ async function viewOf ($: Engine, file: string, out: string) {
 
 /** Reads image `id` once: its file, then its pixels, shrunk; the drawings that wait on it redraw. */
 async function load ($: Engine, id: number) {
-  if (thumbs.has(id) || loading.has(id)) return
+  if (thumbs.has(id) || loading.has(id) || failed.has(id)) return
+  const loadingIn = sessionId
   loading.add(id)
   let picture: Picture
   try {
@@ -273,14 +290,16 @@ async function load ($: Engine, id: number) {
       }
     }
     const { size } = await $.fs.stat(file)
-    thumbs.set(id, pixels)
+    if (sessionId === loadingIn) thumbs.set(id, pixels)
     const format = file.slice(file.lastIndexOf('.') + 1)
     picture = { file, format, bytes: size, width: pixels.width, height: pixels.height, ...(png && { png }) }
   } catch (error) {
+    if (sessionId === loadingIn) failed.add(id)
     picture = { error: error instanceof Error ? error.message : String(error) }
   } finally {
     loading.delete(id)
   }
+  if (sessionId !== loadingIn) return
   // Read in the background: a module unloaded meanwhile has no state to write to.
   await update($, pictures, all => ({ ...all, [id]: picture })).catch(() => undefined)
 }
@@ -411,8 +430,9 @@ function change ($: Engine, next: (now: Shown | null) => Shown | null) {
   const run = changing.then(async () => {
     const last = await read($, shown)
     const to = next(last)
-    if (sameShown(last, to)) return
     movesShown = moves
+    hasShown = to !== null
+    if (sameShown(last, to)) return
     await update($, shown, () => to)
     if (last?.host && last.host !== to?.host) await update($, memberOf(hosting, { requestId: last.host }), () => false)
     if (to?.host && to.host !== last?.host) await update($, memberOf(hosting, { requestId: to.host }), () => true)
@@ -433,7 +453,10 @@ const placeFor = (id: number, target: string) => placeOf(id, target, /\/chip:/.t
 
 /** Notes a transcript row, and which of its rows show: before anything is awaited, so in the transcript's order. */
 function note (e: Row) {
-  if (e.viewport) screenRows = e.viewport.rows
+  if (e.viewport && e.viewport.rows !== screenRows) {
+    screenRows = e.viewport.rows
+    moves++
+  }
   const onScreen = e.props.onScreen
   const row = rows.get(e.requestId)
   if (!row) {
@@ -452,6 +475,7 @@ function note (e: Row) {
  * the newest prompt at the newest turn.
  */
 function transcriptOrder () {
+  if (cachedOrder && cachedOrderSeen === seenRows) return cachedOrder
   const bySeen = (a: [string, Noted], b: [string, Noted]) => a[1].seen - b[1].seen
   const batch = [...rows].filter(([, row]) => row.isBatch).sort(bySeen)
   const notices = batch.filter(([, row]) => row.component === 'InfoNotice')
@@ -467,6 +491,8 @@ function transcriptOrder () {
   if (others.length === 0) ordered.push(...prompts.map(([id]) => id))
   const order = new Map(ordered.map((id, i) => [id, i]))
   for (const [id, row] of rows) if (!row.isBatch) order.set(id, ordered.length + row.seen)
+  cachedOrder = order
+  cachedOrderSeen = seenRows
   return order
 }
 
@@ -526,6 +552,7 @@ function placeOf (id: number, target: string, prompt?: string): Shown | null {
 async function settle ($: Engine) {
   if (seenRows === seenAtLastLook) isBatching = false
   seenAtLastLook = seenRows
+  if (!hasShown || moves === movesShown) return
   await change($, now => !now ? null : !isFromPrompt(now) ? placeFor(now.id, now.target) : moves === movesShown ? now : null)
 }
 
@@ -562,25 +589,34 @@ async function float ($: Engine, e: Row, drawn: RenderElement, overlays: RenderE
 async function track ($: Engine, text: string) {
   await follow($)
   const ids = idsIn(text)
-  if (!sameIds(ids, await read($, draft))) {
+  if (!sameIds(ids, draftIds)) {
+    draftIds = ids
     await update($, draft, () => ids)
-    await change($, closeChipCard)
+    if (hasShown) await change($, closeChipCard)
   }
   for (const id of ids) void load($, id)
 }
 
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
+    poll?.cancel()
+    poll = undefined
     const result = await next(e)
-    const program = await $.env.get('TERM_PROGRAM')
-    const term = await $.env.get('TERM')
-    const isNative = program === 'ghostty' || term === 'xterm-ghostty' || term === 'xterm-kitty' || (await $.env.get('KITTY_WINDOW_ID')) !== undefined
-    const isForced = /^(1|true|yes|on)$/i.test((await $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES')) ?? '')
+    const [program, term, kittyWindow, forceImages, sshConnection, sshTty] = await Promise.all([
+      $.env.get('TERM_PROGRAM'),
+      $.env.get('TERM'),
+      $.env.get('KITTY_WINDOW_ID'),
+      $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES'),
+      $.env.get('SSH_CONNECTION'),
+      $.env.get('SSH_TTY')
+    ])
+    const isNative = program === 'ghostty' || term === 'xterm-ghostty' || term === 'xterm-kitty' || kittyWindow !== undefined
+    const isForced = /^(1|true|yes|on)$/i.test(forceImages ?? '')
     graphics = isNative ? 'file' : isForced ? 'bytes' : 'none'
     // Where the terminal cannot draw the picture itself, a card opens in a window of its own, by
     // the pointer, on the desktop the session runs on: not over SSH, where that is another machine's.
     windowing = undefined
-    const isRemote = (await $.env.get('SSH_CONNECTION')) !== undefined || (await $.env.get('SSH_TTY')) !== undefined
+    const isRemote = sshConnection !== undefined || sshTty !== undefined
     if (options.window !== false && graphics === 'none' && e.isInteractive && !isRemote) {
       const system = await platformOf($)
       if (system === 'macos' || system === 'windows') windowing = system
@@ -593,20 +629,30 @@ export const register: Register = (on, options) => {
     }
     // A reload starts with an empty cache: read again what is in the box.
     await follow($)
-    await track($, (await $.prompt.read()).text)
+    const [initialDraft, initialShown, box] = await Promise.all([read($, draft), read($, shown), $.prompt.read()])
+    draftIds = initialDraft
+    hasShown = initialShown !== null
+    await track($, box.text)
     if (e.isInteractive) {
       // A look that fails (the module unloading under it) waits for the next.
-      $.clock.every(POLL_MS, () => {
+      poll = $.clock.every(POLL_MS, () => {
         void $.prompt.read().then(box => track($, box.text)).then(() => settle($)).catch(() => undefined)
       })
     }
     return result
   })
 
+  on('session.end', ($, e, next) => {
+    poll?.cancel()
+    poll = undefined
+    closeWindow()
+    return next(e)
+  })
+
   // Typing closes the card a chip opened: the box may grow and move the chip from under the pointer.
   on('prompt.edit', async ($, e, next) => {
     const box = await next(e)
-    await change($, closeChipCard)
+    if (hasShown) await change($, closeChipCard)
     await track($, box.text)
     return box
   })
@@ -614,6 +660,7 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     const result = await next(e)
     if (e.origin.kind !== 'composer') return result
+    draftIds = []
     await update($, draft, () => [])
     await change($, () => null)
     for (const id of idsIn(e.text)) void load($, id)
@@ -647,8 +694,9 @@ export const register: Register = (on, options) => {
     if (e.surface !== 'terminal' || e.viewport?.isFullscreen === false) return next(e)
     note(e)
     if (e.component !== 'UserMessage') return float($, e, await next(e))
-    const all = await read($, pictures)
     const ids = e.props.origin.kind === 'composer' ? idsIn(e.props.text) : []
+    if (ids.length === 0) return float($, e, await next(e))
+    const all = await read($, pictures)
     for (const id of ids) if (!all[id]) void load($, id)
     const drawn = await next(e)
     // The engine lists the images it was sent, in the order pasted: each one stored, read or not.
@@ -690,8 +738,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // Off fullscreen the terminal reports no pointer: nothing could be hovered.
     if (e.surface !== 'terminal' || e.props.hasSurvey || e.viewport?.isFullscreen === false) return next(e)
-    const ids = await read($, draft)
-    const now = await read($, shown)
+    const [ids, now] = await Promise.all([read($, draft), read($, shown)])
     const inBand = now && now.host === null && now.edge !== 'window' ? now.id : undefined
     if (ids.length === 0 && inBand === undefined) return next(e)
     if (e.viewport) screenRows = e.viewport.rows

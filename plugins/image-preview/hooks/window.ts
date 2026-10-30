@@ -234,15 +234,21 @@ $format = if ($env:IMAGE_PREVIEW_FORMAT -eq 'png') { [System.Drawing.Imaging.Ima
 $picture.Save($env:IMAGE_PREVIEW_OUT, $format)
 `
 
+const encodedCache = new Map<string, string>()
+
 /** A PowerShell script as `-EncodedCommand` takes it: UTF-16LE, base64. */
 export function encodedCommand (script: string) {
+  const cached = encodedCache.get(script)
+  if (cached !== undefined) return cached
   const bytes = new Uint8Array(script.length * 2)
   for (let i = 0; i < script.length; i++) {
     const code = script.charCodeAt(i)
     bytes[i * 2] = code & 0xff
     bytes[i * 2 + 1] = code >> 8
   }
-  return bytes.toBase64()
+  const encoded = bytes.toBase64()
+  encodedCache.set(script, encoded)
+  return encoded
 }
 
 /** How PowerShell runs one of these scripts: no profile, no prompts, no script policy in the way. */
